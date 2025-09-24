@@ -20,7 +20,6 @@ export async function POST(req: Request, { params }: { params: Params }) {
     const svixId = headerPayload.get("svix-id");
     const svixTimestamp = headerPayload.get("svix-timestamp");
     const svixSignature = headerPayload.get("svix-signature");
-    const webHookSecret = headerPayload.get("x-webhook-secret");
 
     if (!svixId || !svixTimestamp || !svixSignature) {
         return new Response("Error occurred -- no svix headers", { status: 400 });
