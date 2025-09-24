@@ -51,8 +51,13 @@ export async function POST(req: Request, { params }: { params: Params }) {
                     data: {
                         eventType,
                         application: { connect: { name: appName } },
-                        user: { connect: { authUserId: evt.data.user_id } }
-                    },
+                        user: {
+                            connectOrCreate: {
+                                where: { authUserId: evt.data.user_id },
+                                create: { authUserId: evt.data.user_id }
+                            }
+                        },
+                    }
                 });
                 console.log(`User ${evt.data.user_id} logged in to ${appName}`);
                 break;
