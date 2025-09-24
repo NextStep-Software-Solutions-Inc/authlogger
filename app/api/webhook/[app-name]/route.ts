@@ -64,7 +64,12 @@ export async function POST(req: Request, { params }: { params: Params }) {
             case 'session.ended':
                 await prisma.authEvent.create({
                     data: {
-                        user: { connect: { authUserId: evt.data.user_id } },
+                        user: {
+                            connectOrCreate: {
+                                where: { authUserId: evt.data.user_id },
+                                create: { authUserId: evt.data.user_id }
+                            }
+                        },
                         eventType,
                         application: { connect: { name: appName } }
                     },
