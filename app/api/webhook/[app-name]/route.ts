@@ -61,6 +61,9 @@ export async function POST(req: Request, { params }: { params: Params }) {
                 });
                 console.log(`User ${evt.data.user_id} logged in to ${appName}`);
                 break;
+
+            case 'session.revoked':
+            case 'session.removed':
             case 'session.ended':
                 await prisma.authEvent.create({
                     data: {
