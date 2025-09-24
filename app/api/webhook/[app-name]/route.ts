@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { WebhookEvent } from '@clerk/nextjs/server';
 import { PrismaClient } from '@/app/generated/prisma';
 
+
 const prisma = new PrismaClient();
 
 type Params = Promise<{ "app-name": string }>;
@@ -25,8 +26,7 @@ export async function POST(req: Request, { params }: { params: Params }) {
         return new Response("Error occurred -- no svix headers", { status: 400 });
     }
 
-    const payload = await req.json();
-    const body = JSON.stringify(payload);
+    const body = await req.text();
     const wh = new Webhook(WEBHOOK_SECRET);
 
     let evt: WebhookEvent;
