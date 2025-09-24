@@ -243,3 +243,18 @@ export async function exportEventsToExcel(searchParams: {
         return { success: false, error: 'Failed to export events' };
     }
 }
+
+
+export async function getApplicationsForFilter() {
+    try {
+        const applications = await prisma.application.findMany({
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' }
+        });
+
+        return { success: true, applications };
+    } catch (error) {
+        console.error('Error fetching applications:', error);
+        return { success: false, error: 'Failed to fetch applications' };
+    }
+}
