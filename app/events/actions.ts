@@ -141,19 +141,24 @@ export async function getEventStats(searchParams?: {
 
 export async function exportEventsToExcel(searchParams: {
     applicationId: string;
+    eventType?: string;
     startDate?: string;
     endDate?: string;
 }) {
     try {
-        const { applicationId, startDate, endDate } = searchParams;
+        const { applicationId, eventType, startDate, endDate } = searchParams;
 
         if (!applicationId) {
             return { success: false, error: 'Application ID is required' };
         }
 
         const where: Record<string, unknown> = {
-            applicationId
+            applicationId,
         };
+
+        if (eventType) {
+            where.eventType = eventType;
+        }
 
         if (startDate || endDate) {
             where.createdAt = {};
