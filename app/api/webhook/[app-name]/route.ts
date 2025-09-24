@@ -106,7 +106,7 @@ export async function POST(req: Request, { params }: { params: Params }) {
                         }
                     });
                     await tx.user.upsert({
-                        where: { id: evt.data.id },
+                        where: { authUserId: evt.data.id },
                         create: {
                             authUserId: evt.data.id,
                             image: evt.data.image_url,
