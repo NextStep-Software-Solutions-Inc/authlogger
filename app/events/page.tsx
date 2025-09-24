@@ -343,7 +343,7 @@ export default function EventsPage() {
                                                 {event.application.name}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {new Date(event.createdAt).toLocaleString()}
+                                                {new Date(event.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Manila' })}
                                             </td>
                                         </tr>
                                     ))}

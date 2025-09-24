@@ -188,8 +188,8 @@ export async function exportEventsToExcel(searchParams: {
                 : event.user?.authUserId || 'Unknown User',
             'Application': event.application.name,
             'Timestamp': event.createdAt.toISOString(),
-            'Date': event.createdAt.toLocaleDateString(),
-            'Time': event.createdAt.toLocaleTimeString(),
+            'Date': event.createdAt.toLocaleDateString('en-US', { timeZone: 'Asia/Manila' }),
+            'Time': event.createdAt.toLocaleTimeString('en-US', { timeZone: 'Asia/Manila' }),
         }));
 
         // Create workbook and worksheet
