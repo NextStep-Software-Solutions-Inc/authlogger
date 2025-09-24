@@ -105,9 +105,15 @@ export async function POST(req: Request, { params }: { params: Params }) {
                             user: { connect: { authUserId: evt.data.id } },
                         }
                     });
-                    await tx.user.update({
+                    await tx.user.upsert({
                         where: { id: evt.data.id },
-                        data: {
+                        create: {
+                            authUserId: evt.data.id,
+                            image: evt.data.image_url,
+                            firstName: evt.data.first_name,
+                            lastName: evt.data.last_name,
+                        },
+                        update: {
                             image: evt.data.image_url,
                             firstName: evt.data.first_name,
                             lastName: evt.data.last_name,
