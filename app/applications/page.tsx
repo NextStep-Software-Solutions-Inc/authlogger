@@ -1,8 +1,33 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+    Plus,
+    Edit2,
+    Trash2,
+    Copy,
+    Check,
+    AppWindow,
+    Calendar,
+    Link as LinkIcon,
+} from 'lucide-react';
 import { createApplication, getApplications, updateApplication, deleteApplication } from './actions';
-import Link from 'next/link';
+import { AppLayout } from '../components/layout/AppLayout';
+import {
+    Button,
+    Card,
+    CardContent,
+    Input,
+    Textarea,
+    Modal,
+    ConfirmModal,
+    EmptyState,
+    SkeletonCard,
+    useToast,
+} from '../components/ui';
+import { useCopyToClipboard } from '../lib/hooks';
+import { cn, formatDate } from '../lib/utils';
 
 interface Application {
     id: string;
@@ -13,13 +38,20 @@ interface Application {
 
 export default function ApplicationsPage() {
     const [applications, setApplications] = useState<Application[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+    const [formLoading, setFormLoading] = useState(false);
+
+    // Form states
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [editName, setEditName] = useState('');
-    const [editDescription, setEditDescription] = useState('');
+    const [formError, setFormError] = useState('');
+
+    const toast = useToast();
+    const { copy, copied } = useCopyToClipboard();
 
     useEffect(() => {
         fetchApplications();
@@ -27,242 +59,391 @@ export default function ApplicationsPage() {
 
     const fetchApplications = async () => {
         try {
+            setLoading(true);
             const result = await getApplications();
-            if (result.success && result.applications) {
-                setApplications(result.applications);
+            if (result.success && result.data) {
+                setApplications(result.data);
             } else {
-                console.error('Error fetching applications:', result.error);
+                toast.error(result.error || 'Failed to load applications');
             }
-        } catch (error) {
-            console.error('Error fetching applications:', error);
-        }
-    };
-
-    const handleSubmit = async (formData: FormData) => {
-        setLoading(true);
-        setError('');
-
-        try {
-            const result = await createApplication(formData);
-            if (result.success && result.application) {
-                setApplications([result.application, ...applications]);
-                setName('');
-                setDescription('');
-            } else {
-                setError(result.error || 'Failed to create application');
-            }
-        } catch (error) {
-            setError('Network error occurred');
+        } catch {
+            toast.error('Network error occurred');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleEdit = (app: Application) => {
-        setEditingId(app.id);
-        setEditName(app.name);
-        setEditDescription(app.description || '');
-    };
-
-    const handleUpdate = async (formData: FormData) => {
-        setLoading(true);
-        setError('');
-
-        try {
-            const result = await updateApplication(formData);
-            if (result.success && result.application) {
-                setApplications(applications.map(app =>
-                    app.id === result.application.id ? result.application : app
-                ));
-                setEditingId(null);
-                setEditName('');
-                setEditDescription('');
-            } else {
-                setError(result.error || 'Failed to update application');
-            }
-        } catch (error) {
-            setError('Network error occurred');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleDelete = async (appId: string) => {
-        if (!confirm('Are you sure you want to delete this application?')) {
+    const handleCreate = async () => {
+        if (!name.trim()) {
+            setFormError('Application name is required');
             return;
         }
 
-        setLoading(true);
-        setError('');
+        setFormLoading(true);
+        setFormError('');
 
         try {
             const formData = new FormData();
-            formData.append('id', appId);
+            formData.append('name', name);
+            formData.append('description', description);
 
-            const result = await deleteApplication(formData);
-            if (result.success) {
-                setApplications(applications.filter(app => app.id !== appId));
+            const result = await createApplication(formData);
+            if (result.success && result.data) {
+                setApplications([result.data, ...applications]);
+                setIsCreateModalOpen(false);
+                setName('');
+                setDescription('');
+                toast.success('Application created successfully');
             } else {
-                setError(result.error || 'Failed to delete application');
+                setFormError(result.error || 'Failed to create application');
             }
-        } catch (error) {
-            setError('Network error occurred');
+        } catch {
+            setFormError('Network error occurred');
         } finally {
-            setLoading(false);
+            setFormLoading(false);
         }
     };
 
-    const cancelEdit = () => {
-        setEditingId(null);
-        setEditName('');
-        setEditDescription('');
+    const handleEdit = async () => {
+        if (!selectedApp || !name.trim()) {
+            setFormError('Application name is required');
+            return;
+        }
+
+        setFormLoading(true);
+        setFormError('');
+
+        try {
+            const formData = new FormData();
+            formData.append('id', selectedApp.id);
+            formData.append('name', name);
+            formData.append('description', description);
+
+            const result = await updateApplication(formData);
+            if (result.success && result.data) {
+                setApplications(applications.map(app =>
+                    app.id === result.data!.id ? result.data! : app
+                ));
+                setIsEditModalOpen(false);
+                setSelectedApp(null);
+                setName('');
+                setDescription('');
+                toast.success('Application updated successfully');
+            } else {
+                setFormError(result.error || 'Failed to update application');
+            }
+        } catch {
+            setFormError('Network error occurred');
+        } finally {
+            setFormLoading(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!selectedApp) return;
+
+        setFormLoading(true);
+
+        try {
+            const formData = new FormData();
+            formData.append('id', selectedApp.id);
+
+            const result = await deleteApplication(formData);
+            if (result.success) {
+                setApplications(applications.filter(app => app.id !== selectedApp.id));
+                setIsDeleteModalOpen(false);
+                setSelectedApp(null);
+                toast.success('Application deleted successfully');
+            } else {
+                toast.error(result.error || 'Failed to delete application');
+            }
+        } catch {
+            toast.error('Network error occurred');
+        } finally {
+            setFormLoading(false);
+        }
+    };
+
+    const openEditModal = (app: Application) => {
+        setSelectedApp(app);
+        setName(app.name);
+        setDescription(app.description || '');
+        setFormError('');
+        setIsEditModalOpen(true);
+    };
+
+    const openDeleteModal = (app: Application) => {
+        setSelectedApp(app);
+        setIsDeleteModalOpen(true);
+    };
+
+    const getWebhookUrl = (appName: string) => {
+        if (typeof window !== 'undefined') {
+            return `${window.location.origin}/api/webhook/${appName}`;
+        }
+        return `/api/webhook/${appName}`;
+    };
+
+    const handleCopyWebhook = (appName: string) => {
+        copy(getWebhookUrl(appName));
+        toast.success('Webhook URL copied to clipboard');
     };
 
     return (
-        <div className="max-w-4xl mx-auto p-6">
-            <div className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold">Applications</h1>
-                <div className="flex gap-4">
-                    <Link
-                        href="/events"
-                        className="text-blue-600 hover:text-blue-800 font-medium"
-                    >
-                        View Events →
-                    </Link>
-                </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-                <h2 className="text-xl font-semibold mb-4">Create New Application</h2>
-                <form action={handleSubmit} className="space-y-4">
+        <AppLayout>
+            <div className="max-w-6xl mx-auto px-6 py-8">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                     <div>
-                        <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-                            Application Name *
-                        </label>
-                        <input
-                            type="text"
-                            id="name"
-                            name="name"
+                        <motion.h1
+                            initial={{ opacity: 0, y: -20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="text-3xl font-bold text-gray-900 dark:text-white"
+                        >
+                            Applications
+                        </motion.h1>
+                        <motion.p
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.1 }}
+                            className="text-gray-600 dark:text-gray-300 mt-1"
+                        >
+                            Manage your applications and webhook endpoints
+                        </motion.p>
+                    </div>
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 0.2 }}
+                    >
+                        <Button
+                            variant="primary"
+                            leftIcon={<Plus className="w-4 h-4" />}
+                            onClick={() => {
+                                setName('');
+                                setDescription('');
+                                setFormError('');
+                                setIsCreateModalOpen(true);
+                            }}
+                        >
+                            New Application
+                        </Button>
+                    </motion.div>
+                </div>
+
+                {/* Applications Grid */}
+                {loading ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {[...Array(3)].map((_, i) => (
+                            <SkeletonCard key={i} />
+                        ))}
+                    </div>
+                ) : applications.length === 0 ? (
+                    <Card variant="glass" className="py-16">
+                        <EmptyState
+                            icon={<AppWindow className="w-12 h-12" />}
+                            title="No applications yet"
+                            description="Create your first application to start receiving authentication events."
+                            action={
+                                <Button
+                                    variant="primary"
+                                    leftIcon={<Plus className="w-4 h-4" />}
+                                    onClick={() => setIsCreateModalOpen(true)}
+                                >
+                                    Create Application
+                                </Button>
+                            }
+                        />
+                    </Card>
+                ) : (
+                    <motion.div
+                        initial="hidden"
+                        animate="visible"
+                        variants={{
+                            visible: {
+                                transition: { staggerChildren: 0.1 },
+                            },
+                        }}
+                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+                    >
+                        <AnimatePresence mode="popLayout">
+                            {applications.map((app) => (
+                                <motion.div
+                                    key={app.id}
+                                    layout
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.9 }}
+                                    whileHover={{ y: -4 }}
+                                    transition={{ duration: 0.2 }}
+                                >
+                                    <Card variant="glass" className="h-full">
+                                        <CardContent className="p-6">
+                                            {/* Header */}
+                                            <div className="flex items-start justify-between mb-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+                                                        <AppWindow className="w-6 h-6 text-white" />
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="font-semibold text-gray-900 dark:text-white">
+                                                            {app.name}
+                                                        </h3>
+                                                        <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-300">
+                                                            <Calendar className="w-3 h-3" />
+                                                            {formatDate(app.createdAt)}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-1">
+                                                    <button
+                                                        onClick={() => openEditModal(app)}
+                                                        className="p-2 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                                                    >
+                                                        <Edit2 className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => openDeleteModal(app)}
+                                                        className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Description */}
+                                            {app.description && (
+                                                <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-2">
+                                                    {app.description}
+                                                </p>
+                                            )}
+
+                                            {/* Webhook URL */}
+                                            <div className="mt-auto pt-4 border-t border-gray-100 dark:border-gray-700/50">
+                                                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-300 mb-2">
+                                                    <LinkIcon className="w-3 h-3" />
+                                                    Webhook URL
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <code className="flex-1 text-xs bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded-lg truncate font-mono">
+                                                        {getWebhookUrl(app.name)}
+                                                    </code>
+                                                    <button
+                                                        onClick={() => handleCopyWebhook(app.name)}
+                                                        className={cn(
+                                                            'p-2 rounded-lg transition-colors',
+                                                            copied
+                                                                ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                                                                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                                        )}
+                                                    >
+                                                        {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
+                    </motion.div>
+                )}
+
+                {/* Create Modal */}
+                <Modal
+                    isOpen={isCreateModalOpen}
+                    onClose={() => setIsCreateModalOpen(false)}
+                    title="Create New Application"
+                    description="Add a new application to start receiving authentication events."
+                >
+                    <div className="space-y-4">
+                        <Input
+                            label="Application Name"
+                            placeholder="My Awesome App"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            required
+                            error={formError}
                         />
-                    </div>
-                    <div>
-                        <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-                            Description
-                        </label>
-                        <textarea
-                            id="description"
-                            name="description"
+                        <Textarea
+                            label="Description (optional)"
+                            placeholder="Brief description of your application..."
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
                             rows={3}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
+                        <div className="flex gap-3 pt-4">
+                            <Button
+                                variant="secondary"
+                                className="flex-1"
+                                onClick={() => setIsCreateModalOpen(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                className="flex-1"
+                                onClick={handleCreate}
+                                isLoading={formLoading}
+                            >
+                                Create
+                            </Button>
+                        </div>
                     </div>
-                    {error && (
-                        <div className="text-red-600 text-sm">{error}</div>
-                    )}
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                    >
-                        {loading ? 'Creating...' : 'Create Application'}
-                    </button>
-                </form>
-            </div>
+                </Modal>
 
-            <div className="bg-white rounded-lg shadow-md p-6">
-                <h2 className="text-xl font-semibold mb-4">Existing Applications</h2>
-                {applications.length === 0 ? (
-                    <p className="text-gray-500">No applications created yet.</p>
-                ) : (
+                {/* Edit Modal */}
+                <Modal
+                    isOpen={isEditModalOpen}
+                    onClose={() => setIsEditModalOpen(false)}
+                    title="Edit Application"
+                >
                     <div className="space-y-4">
-                        {applications.map((app) => (
-                            <div key={app.id} className="border border-gray-200 rounded-lg p-4">
-                                {editingId === app.id ? (
-                                    <form action={handleUpdate} className="space-y-4">
-                                        <input type="hidden" name="id" value={app.id} />
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Application Name *
-                                            </label>
-                                            <input
-                                                type="text"
-                                                name="name"
-                                                value={editName}
-                                                onChange={(e) => setEditName(e.target.value)}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                required
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Description
-                                            </label>
-                                            <textarea
-                                                name="description"
-                                                value={editDescription}
-                                                onChange={(e) => setEditDescription(e.target.value)}
-                                                rows={2}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                type="submit"
-                                                disabled={loading}
-                                                className="bg-green-600 text-white px-3 py-1 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 text-sm"
-                                            >
-                                                {loading ? 'Saving...' : 'Save'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={cancelEdit}
-                                                className="bg-gray-600 text-white px-3 py-1 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 text-sm"
-                                            >
-                                                Cancel
-                                            </button>
-                                        </div>
-                                    </form>
-                                ) : (
-                                    <>
-                                        <div className="flex justify-between items-start mb-2">
-                                            <h3 className="font-medium text-lg">{app.name}</h3>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleEdit(app)}
-                                                    className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDelete(app.id)}
-                                                    className="text-red-600 hover:text-red-800 text-sm font-medium"
-                                                >
-                                                    Delete
-                                                </button>
-                                            </div>
-                                        </div>
-                                        {app.description && (
-                                            <p className="text-gray-600 mt-1">{app.description}</p>
-                                        )}
-                                        <p className="text-sm text-gray-500 mt-2">
-                                            Created: {new Date(app.createdAt).toLocaleDateString()}
-                                        </p>
-                                        <p className="text-sm text-gray-400 mt-1">
-                                            Webhook URL: {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhook/{app.name}
-                                        </p>
-                                    </>
-                                )}
-                            </div>
-                        ))}
+                        <Input
+                            label="Application Name"
+                            placeholder="My Awesome App"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            error={formError}
+                        />
+                        <Textarea
+                            label="Description (optional)"
+                            placeholder="Brief description of your application..."
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            rows={3}
+                        />
+                        <div className="flex gap-3 pt-4">
+                            <Button
+                                variant="secondary"
+                                className="flex-1"
+                                onClick={() => setIsEditModalOpen(false)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                className="flex-1"
+                                onClick={handleEdit}
+                                isLoading={formLoading}
+                            >
+                                Save Changes
+                            </Button>
+                        </div>
                     </div>
-                )}
+                </Modal>
+
+                {/* Delete Confirmation Modal */}
+                <ConfirmModal
+                    isOpen={isDeleteModalOpen}
+                    onClose={() => setIsDeleteModalOpen(false)}
+                    onConfirm={handleDelete}
+                    title="Delete Application"
+                    message={`Are you sure you want to delete "${selectedApp?.name}"? This action cannot be undone and all associated events will be lost.`}
+                    confirmText="Delete"
+                    variant="danger"
+                    isLoading={formLoading}
+                />
             </div>
-        </div>
+        </AppLayout>
     );
 }

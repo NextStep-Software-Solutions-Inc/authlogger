@@ -1,21 +1,24 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { ThemeProvider } from "./components/providers/ThemeProvider";
+import { ToastContainer } from "./components/ui/Toast";
 import "./globals.css";
 
-const geistSans = Geist({
+const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
+const jetbrainsMono = JetBrains_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Auth Logs - Authentication Event Monitoring",
-  description: "Monitor and analyze authentication events across multiple applications with real-time dashboards and Excel export capabilities.",
+  title: "AuthLogger - Authentication Event Monitoring",
+  description: "Monitor and analyze authentication events across multiple applications with real-time dashboards, analytics, and Excel export capabilities.",
+  keywords: ["authentication", "monitoring", "events", "analytics", "clerk", "webhooks"],
 };
 
 export default function RootLayout({
@@ -25,11 +28,14 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en">
+      <html lang="en" suppressHydrationWarning>
         <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+          className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}
         >
-          {children}
+          <ThemeProvider>
+            {children}
+            <ToastContainer />
+          </ThemeProvider>
         </body>
       </html>
     </ClerkProvider>

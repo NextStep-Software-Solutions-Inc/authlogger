@@ -18,17 +18,19 @@ export async function GET(request: NextRequest) {
             endDate: endDate || undefined,
         });
 
-        if (!result.success) {
-            return NextResponse.json({ error: result.error }, { status: 500 });
+        if (!result.success || !result.data) {
+            return NextResponse.json({ error: result.error || 'Export failed' }, { status: 500 });
         }
 
         // Return the Excel file
-        const response = new NextResponse(result.buffer, {
+        const { buffer, filename } = result.data;
+        const uint8Array = new Uint8Array(buffer);
+        const response = new NextResponse(uint8Array, {
             status: 200,
             headers: {
                 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                'Content-Disposition': `attachment; filename="${result.filename}"`,
-                'Content-Length': result.buffer.length.toString(),
+                'Content-Disposition': `attachment; filename="${filename}"`,
+                'Content-Length': uint8Array.length.toString(),
             },
         });
 

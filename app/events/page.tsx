@@ -1,381 +1,641 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Activity,
+  Users,
+  LogIn,
+  LogOut,
+  Calendar,
+  Download,
+  Filter,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  Clock,
+  Search,
+  SlidersHorizontal,
+  TrendingUp,
+} from 'lucide-react';
 import { getEvents, getEventStats, getApplicationsForFilter } from './actions';
-import Link from 'next/link';
+import { AppLayout } from '../components/layout/AppLayout';
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Select,
+  Input,
+  Badge,
+  StatCard,
+  EmptyState,
+  SkeletonStats,
+  SkeletonTable,
+  useToast,
+} from '../components/ui';
+import { EventsByTypeChart } from '../components/charts/EventCharts';
+import { useDebounce } from '../lib/hooks';
+import { cn, getEventTypeColor, formatDateTime, getRelativeTime, formatNumber } from '../lib/utils';
 
 interface Application {
-    id: string;
-    name: string;
+  id: string;
+  name: string;
 }
 
 interface AuthEvent {
-    id: string;
-    eventType: string;
-    userId: string;
-    applicationId: string;
-    createdAt: Date;
-    application: { id: string; name: string };
-    user: { id: string; authUserId: string; firstName: string | null; lastName: string | null } | null;
+  id: string;
+  eventType: string;
+  userId: string;
+  applicationId: string;
+  createdAt: Date;
+  application: { id: string; name: string };
+  user: { id: string; authUserId: string; firstName: string | null; lastName: string | null } | null;
 }
 
 interface EventStats {
-    totalEvents: number;
-    eventsByType: { type: string; count: number }[];
-    recentActivity: AuthEvent[];
+  totalEvents: number;
+  eventsByType: { type: string; count: number }[];
+  recentActivity: AuthEvent[];
 }
 
 export default function EventsPage() {
-    const [events, setEvents] = useState<AuthEvent[]>([]);
-    const [stats, setStats] = useState<EventStats | null>(null);
-    const [applications, setApplications] = useState<Application[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+  const [events, setEvents] = useState<AuthEvent[]>([]);
+  const [stats, setStats] = useState<EventStats | null>(null);
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [totalEvents, setTotalEvents] = useState(0);
 
-    // Filter states
-    const [selectedApplication, setSelectedApplication] = useState('');
-    const [selectedEventType, setSelectedEventType] = useState('');
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
-    const [currentPage, setCurrentPage] = useState(1);
-    const [hasMore, setHasMore] = useState(false);
+  // Filter states
+  const [selectedApplication, setSelectedApplication] = useState('');
+  const [selectedEventType, setSelectedEventType] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showFilters, setShowFilters] = useState(false);
 
-    const eventTypes = [
-        'session.created',
-        'session.ended',
-        'user.created',
-        'user.updated'
-    ];
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const toast = useToast();
+  const pageSize = 20;
 
-    useEffect(() => {
-        loadInitialData();
-    }, []);
+  const eventTypes = [
+    { value: 'session.created', label: 'Session Created' },
+    { value: 'session.ended', label: 'Session Ended' },
+    { value: 'session.revoked', label: 'Session Revoked' },
+    { value: 'session.removed', label: 'Session Removed' },
+    { value: 'user.created', label: 'User Created' },
+    { value: 'user.updated', label: 'User Updated' },
+  ];
 
-    useEffect(() => {
-        loadEvents();
-    }, [selectedApplication, selectedEventType, startDate, endDate, currentPage]);
+  const loadInitialData = useCallback(async () => {
+    try {
+      setStatsLoading(true);
+      const [appsResult, statsResult] = await Promise.all([
+        getApplicationsForFilter(),
+        getEventStats(),
+      ]);
 
-    const loadInitialData = async () => {
-        try {
-            const [appsResult, statsResult] = await Promise.all([
-                getApplicationsForFilter(),
-                getEventStats()
-            ]);
+      if (appsResult.success && appsResult.data) {
+        setApplications(appsResult.data);
+      }
 
-            if (appsResult.success && appsResult.applications) {
-                setApplications(appsResult.applications);
-            }
+      if (statsResult.success && statsResult.data) {
+        setStats(statsResult.data);
+      }
+    } catch {
+      toast.error('Failed to load data');
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
 
-            if (statsResult.success && statsResult.stats) {
-                setStats(statsResult.stats);
-            }
-        } catch (error) {
-            console.error('Error loading initial data:', error);
+  const loadEvents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await getEvents(
+        {
+          applicationId: selectedApplication || undefined,
+          eventType: selectedEventType || undefined,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+        },
+        {
+          limit: pageSize,
+          offset: (currentPage - 1) * pageSize,
         }
-    };
+      );
 
-    const loadEvents = useCallback(async () => {
-        setLoading(true);
-        try {
-            const result = await getEvents({
-                applicationId: selectedApplication || undefined,
-                eventType: selectedEventType || undefined,
-                startDate: startDate || undefined,
-                endDate: endDate || undefined,
-                limit: 50,
-                offset: (currentPage - 1) * 50
-            });
+      if (result.success && result.data) {
+        setEvents(result.data.events);
+        setTotalEvents(result.data.total || 0);
+      } else {
+        toast.error('Failed to load events');
+      }
+    } catch {
+      toast.error('Network error occurred');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedApplication, selectedEventType, startDate, endDate, currentPage]);
 
-            if (result.success && result.events && result.hasMore !== undefined) {
-                setEvents(result.events);
-                setHasMore(result.hasMore);
-            } else {
-                setError(result.error || 'Failed to load events');
-            }
-        } catch (error) {
-            setError('Network error occurred');
-        } finally {
-            setLoading(false);
-        }
-    }, [selectedApplication, selectedEventType, startDate, endDate, currentPage]);
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
-    const clearFilters = () => {
-        setSelectedApplication('');
-        setSelectedEventType('');
-        setStartDate('');
-        setEndDate('');
-        setCurrentPage(1);
-    };
+  useEffect(() => {
+    loadEvents();
+  }, [loadEvents]);
 
-    const handleExport = async () => {
-        if (!selectedApplication) return;
+  const clearFilters = () => {
+    setSelectedApplication('');
+    setSelectedEventType('');
+    setStartDate('');
+    setEndDate('');
+    setSearchQuery('');
+    setCurrentPage(1);
+  };
 
-        try {
-            const params = new URLSearchParams({
-                applicationId: selectedApplication,
-                ...(startDate && { startDate }),
-                ...(endDate && { endDate }),
-            });
+  const handleExport = async () => {
+    if (!selectedApplication) {
+      toast.warning('Please select an application to export');
+      return;
+    }
 
-            const response = await fetch(`/api/export/events?${params.toString()}`);
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({
+        applicationId: selectedApplication,
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate }),
+      });
 
-            if (response.ok) {
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'events.xlsx';
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-            } else {
-                const errorData = await response.json();
-                setError(errorData.error || 'Failed to export events');
-            }
-        } catch (error) {
-            setError('Network error occurred during export');
-        }
-    };
+      const response = await fetch(`/api/export/events?${params.toString()}`);
 
-    const getEventTypeColor = (eventType: string) => {
-        switch (eventType) {
-            case 'session.created': return 'bg-green-100 text-green-800';
-            case 'session.ended': return 'bg-red-100 text-red-800';
-            case 'user.created': return 'bg-blue-100 text-blue-800';
-            case 'user.updated': return 'bg-yellow-100 text-yellow-800';
-            default: return 'bg-gray-100 text-gray-800';
-        }
-    };
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'events.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast.success('Export completed successfully');
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Failed to export events');
+      }
+    } catch {
+      toast.error('Network error occurred during export');
+    } finally {
+      setExporting(false);
+    }
+  };
 
-    const formatUserName = (user: AuthEvent['user']) => {
-        if (!user) return 'Unknown User';
-        if (user.firstName || user.lastName) {
-            return `${user.firstName || ''} ${user.lastName || ''}`.trim();
-        }
-        return user.authUserId;
-    };
+  const formatUserName = (user: AuthEvent['user']) => {
+    if (!user) return 'Unknown User';
+    if (user.firstName || user.lastName) {
+      return `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    }
+    return user.authUserId.slice(0, 8) + '...';
+  };
 
-    return (
-        <div className="max-w-7xl mx-auto p-6">
-            <div className="flex justify-between items-center mb-8">
-                <h1 className="text-3xl font-bold">Event Monitoring</h1>
-                <Link
-                    href="/applications"
-                    className="text-blue-600 hover:text-blue-800 font-medium"
-                >
-                    ← Back to Applications
-                </Link>
-            </div>
+  const getEventIcon = (eventType: string) => {
+    if (eventType.includes('session.created')) return LogIn;
+    if (eventType.includes('session')) return LogOut;
+    return Users;
+  };
 
-            {/* Statistics Cards */}
-            {stats && (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                    <div className="bg-white rounded-lg shadow-md p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Total Events</h3>
-                        <p className="text-3xl font-bold text-blue-600">{stats.totalEvents.toLocaleString()}</p>
-                    </div>
+  const totalPages = Math.ceil(totalEvents / pageSize);
+  const hasActiveFilters = selectedApplication || selectedEventType || startDate || endDate;
 
-                    <div className="bg-white rounded-lg shadow-md p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Session Events</h3>
-                        <p className="text-3xl font-bold text-green-600">
-                            {stats.eventsByType
-                                .filter(e => e.type.includes('session'))
-                                .reduce((sum, e) => sum + e.count, 0)
-                                .toLocaleString()}
-                        </p>
-                    </div>
+  // Calculate stats
+  const sessionEvents = useMemo(() => {
+    if (!stats) return 0;
+    return stats.eventsByType
+      .filter(e => e.type.includes('session'))
+      .reduce((sum, e) => sum + e.count, 0);
+  }, [stats]);
 
-                    <div className="bg-white rounded-lg shadow-md p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">User Events</h3>
-                        <p className="text-3xl font-bold text-purple-600">
-                            {stats.eventsByType
-                                .filter(e => e.type.includes('user'))
-                                .reduce((sum, e) => sum + e.count, 0)
-                                .toLocaleString()}
-                        </p>
-                    </div>
+  const userEvents = useMemo(() => {
+    if (!stats) return 0;
+    return stats.eventsByType
+      .filter(e => e.type.includes('user'))
+      .reduce((sum, e) => sum + e.count, 0);
+  }, [stats]);
 
-                    <div className="bg-white rounded-lg shadow-md p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Active Today</h3>
-                        <p className="text-3xl font-bold text-orange-600">
-                            {stats.recentActivity.filter(e =>
-                                new Date(e.createdAt).toDateString() === new Date().toDateString()
-                            ).length}
-                        </p>
-                    </div>
-                </div>
-            )}
+  const todayEvents = useMemo(() => {
+    if (!stats) return 0;
+    const today = new Date().toDateString();
+    return stats.recentActivity.filter(e =>
+      new Date(e.createdAt).toDateString() === today
+    ).length;
+  }, [stats]);
 
-            {/* Filters */}
-            <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-                <h2 className="text-xl font-semibold mb-4">Filters</h2>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Application
-                        </label>
-                        <select
-                            value={selectedApplication}
-                            onChange={(e) => setSelectedApplication(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="">All Applications</option>
-                            {applications.map(app => (
-                                <option key={app.id} value={app.id}>{app.name}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Event Type
-                        </label>
-                        <select
-                            value={selectedEventType}
-                            onChange={(e) => setSelectedEventType(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="">All Types</option>
-                            {eventTypes.map(type => (
-                                <option key={type} value={type}>{type}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Start Date
-                        </label>
-                        <input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            End Date
-                        </label>
-                        <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-
-                    <div className="flex items-end">
-                        <div className="flex gap-2">
-                            <button
-                                onClick={clearFilters}
-                                className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
-                            >
-                                Clear Filters
-                            </button>
-                            {selectedApplication && (
-                                <button
-                                    onClick={handleExport}
-                                    disabled={loading}
-                                    className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 text-sm"
-                                >
-                                    {loading ? 'Exporting...' : 'Export to Excel'}
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Events Table */}
-            <div className="bg-white rounded-lg shadow-md overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200">
-                    <h2 className="text-xl font-semibold">Recent Events</h2>
-                </div>
-
-                {loading ? (
-                    <div className="p-8 text-center">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                        <p className="mt-2 text-gray-600">Loading events...</p>
-                    </div>
-                ) : error ? (
-                    <div className="p-8 text-center text-red-600">
-                        {error}
-                    </div>
-                ) : events.length === 0 ? (
-                    <div className="p-8 text-center text-gray-500">
-                        No events found matching the current filters.
-                    </div>
-                ) : (
-                    <>
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Event Type
-                                        </th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            User
-                                        </th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Application
-                                        </th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Timestamp
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                    {events.map((event) => (
-                                        <tr key={event.id} className="hover:bg-gray-50">
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getEventTypeColor(event.eventType)}`}>
-                                                    {event.eventType}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {formatUserName(event.user)}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {event.application.name}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {new Date(event.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Manila' })}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Pagination */}
-                        <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center">
-                            <div className="text-sm text-gray-700">
-                                Showing {((currentPage - 1) * 50) + 1} to {Math.min(currentPage * 50, (currentPage - 1) * 50 + events.length)} events
-                            </div>
-                            <div className="flex space-x-2">
-                                <button
-                                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                                    disabled={currentPage === 1}
-                                    className="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Previous
-                                </button>
-                                <button
-                                    onClick={() => setCurrentPage(currentPage + 1)}
-                                    disabled={!hasMore}
-                                    className="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Next
-                                </button>
-                            </div>
-                        </div>
-                    </>
-                )}
-            </div>
+  return (
+    <AppLayout>
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+          <div>
+            <motion.h1
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-3xl font-bold text-gray-900 dark:text-white"
+            >
+              Event Monitoring
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="text-gray-500 dark:text-gray-400 mt-1"
+            >
+              Track and analyze authentication events in real-time
+            </motion.p>
+          </div>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+            className="flex gap-3"
+          >
+            <Button
+              variant="secondary"
+              leftIcon={<RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />}
+              onClick={() => {
+                loadEvents();
+                loadInitialData();
+              }}
+              disabled={loading}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="success"
+              leftIcon={<Download className="w-4 h-4" />}
+              onClick={handleExport}
+              isLoading={exporting}
+              disabled={!selectedApplication}
+            >
+              Export
+            </Button>
+          </motion.div>
         </div>
-    );
+
+        {/* Statistics Cards */}
+        {statsLoading ? (
+          <SkeletonStats className="mb-8" />
+        ) : stats ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <StatCard
+              title="Total Events"
+              value={formatNumber(stats.totalEvents)}
+              icon={Activity}
+              gradient="from-violet-500 to-purple-500"
+              delay={0}
+            />
+            <StatCard
+              title="Session Events"
+              value={formatNumber(sessionEvents)}
+              icon={LogIn}
+              gradient="from-emerald-500 to-teal-500"
+              delay={0.1}
+            />
+            <StatCard
+              title="User Events"
+              value={formatNumber(userEvents)}
+              icon={Users}
+              gradient="from-blue-500 to-indigo-500"
+              delay={0.2}
+            />
+            <StatCard
+              title="Active Today"
+              value={todayEvents}
+              icon={TrendingUp}
+              gradient="from-orange-500 to-amber-500"
+              delay={0.3}
+            />
+          </div>
+        ) : null}
+
+        {/* Charts Section */}
+        {stats && stats.eventsByType.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <Card variant="glass">
+              <CardHeader>
+                <CardTitle>Events by Type</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <EventsByTypeChart data={stats.eventsByType} />
+              </CardContent>
+            </Card>
+            <Card variant="glass">
+              <CardHeader>
+                <CardTitle>Recent Activity</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {stats.recentActivity.slice(0, 5).map((event) => {
+                    const colors = getEventTypeColor(event.eventType);
+                    const Icon = getEventIcon(event.eventType);
+                    return (
+                      <motion.div
+                        key={event.id}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50"
+                      >
+                        <div className={cn('p-2 rounded-lg', colors.bg)}>
+                          <Icon className={cn('w-4 h-4', colors.text)} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                            {formatUserName(event.user)}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {event.eventType} • {event.application.name}
+                          </p>
+                        </div>
+                        <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                          {getRelativeTime(event.createdAt)}
+                        </span>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Filters */}
+        <Card variant="glass" className="mb-8">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Quick filters */}
+              <div className="flex-1 min-w-[200px] max-w-xs">
+                <Select
+                  value={selectedApplication}
+                  onChange={(e) => {
+                    setSelectedApplication(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  options={applications.map(app => ({ value: app.id, label: app.name }))}
+                  placeholder="All Applications"
+                />
+              </div>
+              <div className="flex-1 min-w-[200px] max-w-xs">
+                <Select
+                  value={selectedEventType}
+                  onChange={(e) => {
+                    setSelectedEventType(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  options={eventTypes}
+                  placeholder="All Event Types"
+                />
+              </div>
+
+              {/* Toggle advanced filters */}
+              <Button
+                variant={showFilters ? 'primary' : 'ghost'}
+                size="sm"
+                leftIcon={<SlidersHorizontal className="w-4 h-4" />}
+                onClick={() => setShowFilters(!showFilters)}
+              >
+                {showFilters ? 'Hide' : 'More'} Filters
+              </Button>
+
+              {/* Clear filters */}
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={<X className="w-4 h-4" />}
+                  onClick={clearFilters}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            {/* Advanced filters */}
+            <AnimatePresence>
+              {showFilters && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 mt-4 border-t border-gray-200 dark:border-gray-700">
+                    <Input
+                      type="date"
+                      label="Start Date"
+                      value={startDate}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      leftIcon={<Calendar className="w-4 h-4" />}
+                    />
+                    <Input
+                      type="date"
+                      label="End Date"
+                      value={endDate}
+                      onChange={(e) => {
+                        setEndDate(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      leftIcon={<Calendar className="w-4 h-4" />}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
+
+        {/* Events Table */}
+        <Card variant="glass">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Events</CardTitle>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              {formatNumber(totalEvents)} total events
+            </span>
+          </CardHeader>
+
+          {loading ? (
+            <div className="p-6">
+              <SkeletonTable rows={5} columns={4} />
+            </div>
+          ) : events.length === 0 ? (
+            <EmptyState
+              icon={<Activity className="w-12 h-12" />}
+              title="No events found"
+              description={hasActiveFilters
+                ? "Try adjusting your filters to see more events."
+                : "Events will appear here when users authenticate in your applications."
+              }
+              action={
+                hasActiveFilters && (
+                  <Button variant="secondary" onClick={clearFilters}>
+                    Clear Filters
+                  </Button>
+                )
+              }
+              className="py-16"
+            />
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Event
+                      </th>
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        User
+                      </th>
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Application
+                      </th>
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Time
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    <AnimatePresence mode="popLayout">
+                      {events.map((event, index) => {
+                        const colors = getEventTypeColor(event.eventType);
+                        const Icon = getEventIcon(event.eventType);
+                        return (
+                          <motion.tr
+                            key={event.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            transition={{ delay: index * 0.03 }}
+                            className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                          >
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className={cn('p-2 rounded-lg', colors.bg)}>
+                                  <Icon className={cn('w-4 h-4', colors.text)} />
+                                </div>
+                                <Badge
+                                  variant={
+                                    event.eventType.includes('created') ? 'success' :
+                                      event.eventType.includes('ended') || event.eventType.includes('revoked') ? 'danger' :
+                                        'default'
+                                  }
+                                  size="sm"
+                                >
+                                  {event.eventType}
+                                </Badge>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div>
+                                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                  {formatUserName(event.user)}
+                                </p>
+                                {event.user && (
+                                  <p className="text-xs text-gray-500 dark:text-gray-300 truncate max-w-[200px]">
+                                    {event.user.authUserId}
+                                  </p>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="text-sm text-gray-700 dark:text-gray-300">
+                                {event.application.name}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-300">
+                                <Clock className="w-4 h-4" />
+                                <span title={formatDateTime(event.createdAt)}>
+                                  {getRelativeTime(event.createdAt)}
+                                </span>
+                              </div>
+                            </td>
+                          </motion.tr>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-sm text-gray-500 dark:text-gray-300">
+                  Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalEvents)} of {formatNumber(totalEvents)} events
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<ChevronLeft className="w-4 h-4" />}
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum: number;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={cn(
+                            'w-8 h-8 rounded-lg text-sm font-medium transition-colors',
+                            currentPage === pageNum
+                              ? 'bg-violet-500 text-white'
+                              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                          )}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    rightIcon={<ChevronRight className="w-4 h-4" />}
+                    onClick={() => setCurrentPage(currentPage + 1)}
+                    disabled={currentPage >= totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+    </AppLayout>
+  );
 }
