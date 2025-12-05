@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -76,7 +76,9 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [totalEvents, setTotalEvents] = useState(0);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Filter states
   const [selectedApplication, setSelectedApplication] = useState('');
@@ -91,6 +93,17 @@ export default function EventsPage() {
   const debouncedSearch = useDebounce(searchQuery, 300);
   const toast = useToast();
   const pageSize = 20;
+
+  // Close export menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const eventTypes = [
     { value: 'session.created', label: 'Session Created' },
@@ -176,9 +189,18 @@ export default function EventsPage() {
     setCurrentPage(1);
   };
 
-  const handleExport = async () => {
+  const handleExport = async (exportType: 'raw' | 'user-activity') => {
+    setShowExportMenu(false);
+
     if (!selectedApplication) {
       toast.warning('Please select an application to export');
+      return;
+    }
+
+    // Check if any filter is applied
+    const hasFilters = selectedUser || selectedEventType || startDate || endDate;
+    if (!hasFilters) {
+      toast.warning('Please apply at least one filter (User, Event Type, or Date range) before exporting');
       return;
     }
 
@@ -186,6 +208,7 @@ export default function EventsPage() {
     try {
       const params = new URLSearchParams({
         applicationId: selectedApplication,
+        exportType,
         ...(selectedUser && { userId: selectedUser }),
         ...(selectedEventType && { eventType: selectedEventType }),
         ...(startDate && { startDate }),
@@ -295,15 +318,34 @@ export default function EventsPage() {
             >
               Refresh
             </Button>
-            <Button
-              variant="success"
-              leftIcon={<Download className="w-4 h-4" />}
-              onClick={handleExport}
-              isLoading={exporting}
-              disabled={!selectedApplication}
-            >
-              Export
-            </Button>
+            <div className="relative" ref={exportMenuRef}>
+              <Button
+                variant="success"
+                leftIcon={<Download className="w-4 h-4" />}
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                isLoading={exporting}
+              >
+                Export
+              </Button>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                  <button
+                    className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-t-lg transition-colors"
+                    onClick={() => handleExport('raw')}
+                  >
+                    <div className="font-medium">Raw Export</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">All events as-is</div>
+                  </button>
+                  <button
+                    className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-b-lg transition-colors border-t border-gray-200 dark:border-gray-700"
+                    onClick={() => handleExport('user-activity')}
+                  >
+                    <div className="font-medium">User Activity</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Grouped by user & date</div>
+                  </button>
+                </div>
+              )}
+            </div>
           </motion.div>
         </div>
 

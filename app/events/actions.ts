@@ -419,6 +419,142 @@ export async function exportEventsToExcel(
     }
 }
 
+// Export events to Excel in User Activity format (grouped by user with session created/removed)
+export async function exportUserActivityToExcel(
+    filters: EventFilters & { applicationId: string }
+): Promise<ActionResult<{ buffer: Buffer; filename: string; count: number }>> {
+    try {
+        const { applicationId, ...otherFilters } = filters;
+
+        if (!applicationId) {
+            return { success: false, error: 'Application ID is required for export' };
+        }
+
+        const where = buildWhereClause({ applicationId, ...otherFilters });
+
+        // Limit export to 10,000 records for performance
+        const events = await prisma.authEvent.findMany({
+            where: {
+                ...where,
+                eventType: { in: ['session.created', 'session.ended', 'session.removed', 'session.revoked'] }
+            },
+            include: eventInclude,
+            orderBy: { createdAt: 'asc' },
+            take: 10000
+        });
+
+        if (events.length === 0) {
+            return { success: false, error: 'No session events to export' };
+        }
+
+        // Group events by user
+        const userEventsMap = new Map<string, {
+            userName: string;
+            events: typeof events;
+        }>();
+
+        for (const event of events) {
+            const userId = event.userId || 'unknown';
+            const userName = event.user?.firstName && event.user?.lastName
+                ? `${event.user.firstName} ${event.user.lastName}`.trim()
+                : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User';
+
+            if (!userEventsMap.has(userId)) {
+                userEventsMap.set(userId, { userName, events: [] });
+            }
+            userEventsMap.get(userId)!.events.push(event);
+        }
+
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        const wsData: (string | null)[][] = [];
+        let totalRows = 0;
+
+        // Process each user
+        for (const [, userData] of userEventsMap) {
+            // Add user header
+            wsData.push([`UserName: ${userData.userName}`]);
+            wsData.push(['Date', 'Session Created', 'Session Removed']);
+
+            // Group events by date
+            const dateEventsMap = new Map<string, { created: string | null; removed: string | null }>();
+
+            for (const event of userData.events) {
+                const dateKey = event.createdAt.toLocaleDateString('en-US', {
+                    timeZone: 'Asia/Manila',
+                    month: 'numeric',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+
+                if (!dateEventsMap.has(dateKey)) {
+                    dateEventsMap.set(dateKey, { created: null, removed: null });
+                }
+
+                const timeStr = event.createdAt.toLocaleTimeString('en-US', {
+                    timeZone: 'Asia/Manila',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true
+                });
+
+                const dateEntry = dateEventsMap.get(dateKey)!;
+                if (event.eventType === 'session.created') {
+                    dateEntry.created = timeStr;
+                } else if (['session.ended', 'session.removed', 'session.revoked'].includes(event.eventType)) {
+                    dateEntry.removed = timeStr;
+                }
+            }
+
+            // Add date rows
+            for (const [date, times] of dateEventsMap) {
+                wsData.push([date, times.created || '', times.removed || '']);
+                totalRows++;
+            }
+
+            // Add empty row between users
+            wsData.push([]);
+        }
+
+        // Create worksheet
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+        // Auto-size columns
+        ws['!cols'] = [
+            { wch: 15 }, // Date
+            { wch: 18 }, // Session Created
+            { wch: 18 }, // Session Removed
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, 'User Activity');
+
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+        // Get application name for filename
+        const application = await prisma.application.findUnique({
+            where: { id: applicationId },
+            select: { name: true }
+        });
+
+        const appName = application?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'Unknown';
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `user_activity_${appName}_${timestamp}.xlsx`;
+
+        return {
+            success: true,
+            data: {
+                buffer,
+                filename,
+                count: totalRows
+            }
+        };
+    } catch (error) {
+        console.error('Error exporting user activity to Excel:', error);
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
 // Get applications for filter dropdown (cached wrapper)
 export async function getApplicationsForFilter(): Promise<ActionResult<{ id: string; name: string }[]>> {
     try {
