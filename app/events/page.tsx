@@ -125,7 +125,7 @@ export default function EventsPage() {
   // Update URL when filters change
   const updateUrlParams = useCallback((params: Record<string, string | number>) => {
     const url = new URL(window.location.href);
-    
+
     Object.entries(params).forEach(([key, value]) => {
       if (value && value !== '' && value !== 1) {
         url.searchParams.set(key, String(value));

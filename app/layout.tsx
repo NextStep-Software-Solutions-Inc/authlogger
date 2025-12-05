@@ -21,13 +21,14 @@ export const metadata: Metadata = {
   keywords: ["authentication", "monitoring", "events", "analytics", "clerk", "webhooks"],
 };
 
+const CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
       <html lang="en" suppressHydrationWarning>
         <body
           className={`${inter.variable} ${jetbrainsMono.variable} antialiased`}
