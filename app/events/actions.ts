@@ -1,59 +1,183 @@
 'use server';
 
-import { PrismaClient } from '@/app/generated/prisma';
+import { prisma, isPrismaError, getPrismaErrorMessage } from '@/app/lib/db';
+import { unstable_cache } from 'next/cache';
 import * as XLSX from 'xlsx';
 
-const prisma = new PrismaClient();
-
-export async function getEvents(searchParams?: {
+// Types
+export interface EventFilters {
     applicationId?: string;
     eventType?: string;
     startDate?: string;
     endDate?: string;
+    userId?: string;
+    search?: string;
+}
+
+export interface PaginationParams {
     limit?: number;
     offset?: number;
-}) {
+    page?: number;
+}
+
+export interface AuthEvent {
+    id: string;
+    eventType: string;
+    userId: string;
+    applicationId: string;
+    createdAt: Date;
+    application: {
+        id: string;
+        name: string;
+    };
+    user: {
+        id: string;
+        authUserId: string;
+        firstName: string | null;
+        lastName: string | null;
+    } | null;
+}
+
+export interface EventStats {
+    totalEvents: number;
+    eventsByType: { type: string; count: number }[];
+    recentActivity: AuthEvent[];
+    todayCount: number;
+    weekCount: number;
+    uniqueUsers: number;
+}
+
+interface ActionResult<T = void> {
+    success: boolean;
+    error?: string;
+    data?: T;
+}
+
+// Validation helpers
+function validateDateString(date: string | undefined): Date | null {
+    if (!date) return null;
+    const parsed = new Date(date);
+    return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+// Parse date string to start of day in UTC
+function parseStartDate(dateStr: string | undefined): Date | null {
+    if (!dateStr) return null;
+    const parsed = new Date(dateStr);
+    if (isNaN(parsed.getTime())) return null;
+    // Set to start of day (00:00:00.000)
+    parsed.setHours(0, 0, 0, 0);
+    return parsed;
+}
+
+// Parse date string to end of day in UTC
+function parseEndDate(dateStr: string | undefined): Date | null {
+    if (!dateStr) return null;
+    const parsed = new Date(dateStr);
+    if (isNaN(parsed.getTime())) return null;
+    // Set to end of day (23:59:59.999)
+    parsed.setHours(23, 59, 59, 999);
+    return parsed;
+}
+
+function validatePagination(params: PaginationParams): { limit: number; offset: number } {
+    const limit = Math.min(Math.max(1, params.limit || 50), 100); // 1-100 range
+    const page = Math.max(1, params.page || 1);
+    const offset = params.offset ?? (page - 1) * limit;
+    return { limit, offset: Math.max(0, offset) };
+}
+
+// Build Prisma where clause from filters
+function buildWhereClause(filters: EventFilters) {
+    const where: Record<string, unknown> = {};
+
+    if (filters.applicationId) {
+        where.applicationId = filters.applicationId;
+    }
+
+    if (filters.eventType) {
+        where.eventType = filters.eventType;
+    }
+
+    if (filters.userId) {
+        where.userId = filters.userId;
+    }
+
+    // Use dedicated date parsing functions for consistent date range handling
+    const startDate = parseStartDate(filters.startDate);
+    const endDate = parseEndDate(filters.endDate);
+
+    if (startDate || endDate) {
+        where.createdAt = {};
+        if (startDate) {
+            (where.createdAt as Record<string, Date>).gte = startDate;
+        }
+        if (endDate) {
+            (where.createdAt as Record<string, Date>).lte = endDate;
+        }
+    }
+
+    // Search in user names or event types
+    if (filters.search) {
+        where.OR = [
+            { eventType: { contains: filters.search, mode: 'insensitive' } },
+            { user: { firstName: { contains: filters.search, mode: 'insensitive' } } },
+            { user: { lastName: { contains: filters.search, mode: 'insensitive' } } },
+        ];
+    }
+
+    return where;
+}
+
+// Include clause for event queries
+const eventInclude = {
+    application: {
+        select: { id: true, name: true }
+    },
+    user: {
+        select: { id: true, authUserId: true, firstName: true, lastName: true }
+    }
+};
+
+// Cached queries for frequently accessed data
+export const getEventTypesCached = unstable_cache(
+    async () => {
+        const types = await prisma.authEvent.findMany({
+            select: { eventType: true },
+            distinct: ['eventType'],
+            orderBy: { eventType: 'asc' }
+        });
+        return types.map(t => t.eventType);
+    },
+    ['event-types'],
+    { revalidate: 300, tags: ['events'] } // Cache for 5 minutes
+);
+
+export const getApplicationsForFilterCached = unstable_cache(
+    async () => {
+        const applications = await prisma.application.findMany({
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' }
+        });
+        return applications;
+    },
+    ['applications-for-filter'],
+    { revalidate: 60, tags: ['applications'] }
+);
+
+// Main event queries
+export async function getEvents(
+    filters: EventFilters = {},
+    pagination: PaginationParams = {}
+): Promise<ActionResult<{ events: AuthEvent[]; total: number; hasMore: boolean }>> {
     try {
-        const {
-            applicationId,
-            eventType,
-            startDate,
-            endDate,
-            limit = 50,
-            offset = 0
-        } = searchParams || {};
-
-        const where: Record<string, unknown> = {};
-
-        if (applicationId) {
-            where.applicationId = applicationId;
-        }
-
-        if (eventType) {
-            where.eventType = eventType;
-        }
-
-        if (startDate || endDate) {
-            where.createdAt = {};
-            if (startDate) {
-                (where.createdAt as Record<string, unknown>).gte = new Date(startDate);
-            }
-            if (endDate) {
-                (where.createdAt as Record<string, unknown>).lte = new Date(endDate);
-            }
-        }
+        const where = buildWhereClause(filters);
+        const { limit, offset } = validatePagination(pagination);
 
         const [events, total] = await Promise.all([
             prisma.authEvent.findMany({
                 where,
-                include: {
-                    application: {
-                        select: { id: true, name: true }
-                    },
-                    user: {
-                        select: { id: true, authUserId: true, firstName: true, lastName: true }
-                    }
-                },
+                include: eventInclude,
                 orderBy: { createdAt: 'desc' },
                 take: limit,
                 skip: offset,
@@ -63,43 +187,41 @@ export async function getEvents(searchParams?: {
 
         return {
             success: true,
-            events,
-            total,
-            hasMore: offset + limit < total
+            data: {
+                events: events as AuthEvent[],
+                total,
+                hasMore: offset + limit < total
+            }
         };
     } catch (error) {
-        console.error('Error fetching events:', error);
-        return { success: false, error: 'Failed to fetch events' };
+        return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
 
-export async function getEventStats(searchParams?: {
-    applicationId?: string;
-    startDate?: string;
-    endDate?: string;
-}) {
+// Get event statistics with caching
+export async function getEventStats(
+    filters: EventFilters = {}
+): Promise<ActionResult<EventStats>> {
     try {
-        const { applicationId, startDate, endDate } = searchParams || {};
+        const where = buildWhereClause(filters);
 
-        const where: Record<string, unknown> = {};
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const weekStart = new Date(todayStart);
+        weekStart.setDate(weekStart.getDate() - 7);
 
-        if (applicationId) {
-            where.applicationId = applicationId;
-        }
-
-        if (startDate || endDate) {
-            where.createdAt = {};
-            if (startDate) {
-                (where.createdAt as Record<string, unknown>).gte = new Date(startDate);
-            }
-            if (endDate) {
-                (where.createdAt as Record<string, unknown>).lte = new Date(endDate);
-            }
-        }
-
-        const [totalEvents, eventsByType, recentActivity] = await Promise.all([
+        const [
+            totalEvents,
+            eventsByType,
+            recentActivity,
+            todayCount,
+            weekCount,
+            uniqueUsers
+        ] = await Promise.all([
+            // Total events count
             prisma.authEvent.count({ where }),
 
+            // Events grouped by type
             prisma.authEvent.groupBy({
                 by: ['eventType'],
                 where,
@@ -107,94 +229,172 @@ export async function getEventStats(searchParams?: {
                 orderBy: { _count: { eventType: 'desc' } }
             }),
 
+            // Recent activity (last 10 events)
             prisma.authEvent.findMany({
                 where,
-                include: {
-                    application: {
-                        select: { id: true, name: true }
-                    },
-                    user: {
-                        select: { id: true, authUserId: true, firstName: true, lastName: true }
-                    }
-                },
+                include: eventInclude,
                 orderBy: { createdAt: 'desc' },
                 take: 10
-            })
+            }),
+
+            // Today's events
+            prisma.authEvent.count({
+                where: {
+                    ...where,
+                    createdAt: { gte: todayStart }
+                }
+            }),
+
+            // This week's events
+            prisma.authEvent.count({
+                where: {
+                    ...where,
+                    createdAt: { gte: weekStart }
+                }
+            }),
+
+            // Unique users
+            prisma.authEvent.findMany({
+                where,
+                select: { userId: true },
+                distinct: ['userId']
+            }).then(users => users.length)
         ]);
 
         return {
             success: true,
-            stats: {
+            data: {
                 totalEvents,
-                eventsByType: eventsByType.map((item: { eventType: string; _count: { eventType: number } }) => ({
+                eventsByType: eventsByType.map(item => ({
                     type: item.eventType,
                     count: item._count.eventType
                 })),
-                recentActivity
+                recentActivity: recentActivity as AuthEvent[],
+                todayCount,
+                weekCount,
+                uniqueUsers
             }
         };
     } catch (error) {
-        console.error('Error fetching event stats:', error);
-        return { success: false, error: 'Failed to fetch event statistics' };
+        return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
 
-export async function exportEventsToExcel(searchParams: {
-    applicationId: string;
-    eventType?: string;
-    startDate?: string;
-    endDate?: string;
-}) {
+// Get single event by ID
+export async function getEventById(id: string): Promise<ActionResult<AuthEvent | null>> {
     try {
-        const { applicationId, eventType, startDate, endDate } = searchParams;
-
-        if (!applicationId) {
-            return { success: false, error: 'Application ID is required' };
+        if (!id) {
+            return { success: false, error: 'Event ID is required' };
         }
 
-        const where: Record<string, unknown> = {
-            applicationId,
-        };
-
-        if (eventType) {
-            where.eventType = eventType;
-        }
-
-        if (startDate || endDate) {
-            where.createdAt = {};
-            if (startDate) {
-                (where.createdAt as Record<string, unknown>).gte = new Date(startDate);
-            }
-            if (endDate) {
-                (where.createdAt as Record<string, unknown>).lte = new Date(endDate);
-            }
-        }
-
-        const events = await prisma.authEvent.findMany({
-            where,
-            include: {
-                application: {
-                    select: { id: true, name: true }
-                },
-                user: {
-                    select: { id: true, authUserId: true, firstName: true, lastName: true }
-                }
-            },
-            orderBy: { createdAt: 'desc' },
+        const event = await prisma.authEvent.findUnique({
+            where: { id },
+            include: eventInclude
         });
 
-        // Transform data for Excel
+        return { success: true, data: event as AuthEvent | null };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Get events trend data (for charts)
+export async function getEventsTrend(
+    filters: EventFilters = {},
+    days: number = 30
+): Promise<ActionResult<{ date: string; count: number }[]>> {
+    try {
+        const where = buildWhereClause(filters);
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+        startDate.setHours(0, 0, 0, 0);
+
+        // Get events within date range
+        const events = await prisma.authEvent.findMany({
+            where: {
+                ...where,
+                createdAt: { gte: startDate }
+            },
+            select: { createdAt: true },
+            orderBy: { createdAt: 'asc' }
+        });
+
+        // Group by date
+        const countsByDate = new Map<string, number>();
+
+        // Initialize all dates with 0
+        for (let i = 0; i <= days; i++) {
+            const date = new Date(startDate);
+            date.setDate(date.getDate() + i);
+            const dateStr = date.toISOString().split('T')[0];
+            countsByDate.set(dateStr, 0);
+        }
+
+        // Count events per date
+        events.forEach(event => {
+            const dateStr = event.createdAt.toISOString().split('T')[0];
+            countsByDate.set(dateStr, (countsByDate.get(dateStr) || 0) + 1);
+        });
+
+        const trend = Array.from(countsByDate.entries()).map(([date, count]) => ({
+            date,
+            count
+        }));
+
+        return { success: true, data: trend };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Export events to Excel - Full format with all details
+export async function exportFullEventsToExcel(
+    filters: EventFilters & { applicationId: string }
+): Promise<ActionResult<{ buffer: Buffer; filename: string; count: number }>> {
+    try {
+        const { applicationId, ...otherFilters } = filters;
+
+        if (!applicationId) {
+            return { success: false, error: 'Application ID is required for export' };
+        }
+
+        const where = buildWhereClause({ applicationId, ...otherFilters });
+
+        // Limit export to 10,000 records for performance
+        const events = await prisma.authEvent.findMany({
+            where,
+            include: eventInclude,
+            orderBy: { createdAt: 'desc' },
+            take: 10000
+        });
+
+        if (events.length === 0) {
+            return { success: false, error: 'No events to export' };
+        }
+
+        // Transform data for Excel - Full format with all details
         const excelData = events.map(event => ({
             'Event ID': event.id,
             'Event Type': event.eventType,
             'User ID': event.userId,
             'User Name': event.user?.firstName && event.user?.lastName
-                ? `${event.user.firstName} ${event.user.lastName}`
-                : event.user?.authUserId || 'Unknown User',
-            'Application': event.application.name,
+                ? `${event.user.firstName} ${event.user.lastName}`.trim()
+                : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User',
+            'Application': event.application?.name || 'Unknown',
             'Timestamp': event.createdAt.toISOString(),
-            'Date': event.createdAt.toLocaleDateString('en-US', { timeZone: 'Asia/Manila' }),
-            'Time': event.createdAt.toLocaleTimeString('en-US', { timeZone: 'Asia/Manila' }),
+            'Date': event.createdAt.toLocaleDateString('en-US', {
+                timeZone: 'Asia/Manila',
+                month: 'numeric',
+                day: 'numeric',
+                year: 'numeric'
+            }),
+            'Time': event.createdAt.toLocaleTimeString('en-US', {
+                timeZone: 'Asia/Manila',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            }),
         }));
 
         // Create workbook and worksheet
@@ -202,22 +402,19 @@ export async function exportEventsToExcel(searchParams: {
         const ws = XLSX.utils.json_to_sheet(excelData);
 
         // Auto-size columns
-        const colWidths = [
-            { wch: 36 }, // Event ID
-            { wch: 15 }, // Event Type
-            { wch: 36 }, // User ID
-            { wch: 30 }, // User Name
-            { wch: 20 }, // Application
-            { wch: 20 }, // Timestamp
+        ws['!cols'] = [
+            { wch: 30 }, // Event ID
+            { wch: 18 }, // Event Type
+            { wch: 30 }, // User ID
+            { wch: 25 }, // User Name
+            { wch: 15 }, // Application
+            { wch: 26 }, // Timestamp
             { wch: 12 }, // Date
-            { wch: 12 }, // Time
+            { wch: 14 }, // Time
         ];
-        ws['!cols'] = colWidths;
 
-        // Add worksheet to workbook
         XLSX.utils.book_append_sheet(wb, ws, 'Events');
 
-        // Generate buffer
         const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
         // Get application name for filename
@@ -226,40 +423,328 @@ export async function exportEventsToExcel(searchParams: {
             select: { name: true }
         });
 
-        const appName = application?.name || 'Unknown';
-        const dateRange = startDate && endDate
-            ? `_${startDate}_to_${endDate}`
-            : startDate
-                ? `_from_${startDate}`
-                : endDate
-                    ? `_to_${endDate}`
-                    : '';
-
-        const filename = `auth_events_${appName.replace(/\s+/g, '_')}${dateRange}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        const appName = application?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'Unknown';
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `auth_events_full_${appName}_${timestamp}.xlsx`;
 
         return {
             success: true,
-            buffer,
-            filename,
-            count: events.length
+            data: {
+                buffer,
+                filename,
+                count: events.length
+            }
         };
     } catch (error) {
-        console.error('Error exporting events to Excel:', error);
-        return { success: false, error: 'Failed to export events' };
+        return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
 
-
-export async function getApplicationsForFilter() {
+// Export events to Excel - Simple format with basic details
+export async function exportSimpleEventsToExcel(
+    filters: EventFilters & { applicationId: string }
+): Promise<ActionResult<{ buffer: Buffer; filename: string; count: number }>> {
     try {
-        const applications = await prisma.application.findMany({
-            select: { id: true, name: true },
-            orderBy: { name: 'asc' }
+        const { applicationId, ...otherFilters } = filters;
+
+        if (!applicationId) {
+            return { success: false, error: 'Application ID is required for export' };
+        }
+
+        const where = buildWhereClause({ applicationId, ...otherFilters });
+
+        // Limit export to 10,000 records for performance
+        const events = await prisma.authEvent.findMany({
+            where,
+            include: eventInclude,
+            orderBy: { createdAt: 'desc' },
+            take: 10000
         });
 
-        return { success: true, applications };
+        if (events.length === 0) {
+            return { success: false, error: 'No events to export' };
+        }
+
+        // Transform data for Excel - simplified template with only UserName, Event Type, Date, Time
+        const excelData = events.map(event => ({
+            'UserName': event.user?.firstName && event.user?.lastName
+                ? `${event.user.firstName} ${event.user.lastName}`.trim()
+                : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User',
+            'Event Type': event.eventType,
+            'Date': event.createdAt.toLocaleDateString('en-US', {
+                timeZone: 'Asia/Manila',
+                month: 'numeric',
+                day: 'numeric',
+                year: 'numeric'
+            }),
+            'Time': event.createdAt.toLocaleTimeString('en-US', {
+                timeZone: 'Asia/Manila',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            }),
+        }));
+
+        // Create workbook and worksheet
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(excelData);
+
+        // Auto-size columns
+        ws['!cols'] = [
+            { wch: 30 }, // UserName
+            { wch: 20 }, // Event Type
+            { wch: 12 }, // Date
+            { wch: 14 }, // Time
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, 'Events');
+
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+        // Get application name for filename
+        const application = await prisma.application.findUnique({
+            where: { id: applicationId },
+            select: { name: true }
+        });
+
+        const appName = application?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'Unknown';
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `auth_events_simple_${appName}_${timestamp}.xlsx`;
+
+        return {
+            success: true,
+            data: {
+                buffer,
+                filename,
+                count: events.length
+            }
+        };
     } catch (error) {
-        console.error('Error fetching applications:', error);
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Export events to Excel in User Activity format (grouped by user with session created/removed)
+export async function exportUserActivityToExcel(
+    filters: EventFilters & { applicationId: string }
+): Promise<ActionResult<{ buffer: Buffer; filename: string; count: number }>> {
+    try {
+        const { applicationId, ...otherFilters } = filters;
+
+        if (!applicationId) {
+            return { success: false, error: 'Application ID is required for export' };
+        }
+
+        // Build the where clause with all filters
+        const where = buildWhereClause({ applicationId, ...otherFilters });
+
+        // Only add session event type filter if no specific eventType filter is applied
+        // This ensures user's eventType filter is respected
+        const sessionEventTypes = ['session.created', 'session.ended', 'session.removed', 'session.revoked'];
+        const finalWhere = otherFilters.eventType
+            ? where // User specified an event type, use their filter
+            : { ...where, eventType: { in: sessionEventTypes } }; // Default to session events only
+
+        // Limit export to 10,000 records for performance
+        const events = await prisma.authEvent.findMany({
+            where: finalWhere,
+            include: eventInclude,
+            orderBy: { createdAt: 'asc' },
+            take: 10000
+        });
+
+        if (events.length === 0) {
+            return { success: false, error: 'No session events to export' };
+        }
+
+        // Group events by user
+        const userEventsMap = new Map<string, {
+            userName: string;
+            events: typeof events;
+        }>();
+
+        for (const event of events) {
+            const userId = event.userId || 'unknown';
+            const userName = event.user?.firstName && event.user?.lastName
+                ? `${event.user.firstName} ${event.user.lastName}`.trim()
+                : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User';
+
+            if (!userEventsMap.has(userId)) {
+                userEventsMap.set(userId, { userName, events: [] });
+            }
+            userEventsMap.get(userId)!.events.push(event);
+        }
+
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        const wsData: (string | null)[][] = [];
+        let totalRows = 0;
+
+        // Process each user
+        for (const [, userData] of userEventsMap) {
+            // Add user header
+            wsData.push([`UserName: ${userData.userName}`]);
+            wsData.push(['Date', 'Session Created', 'Session Removed']);
+
+            // Group events by date
+            const dateEventsMap = new Map<string, { created: string | null; removed: string | null }>();
+
+            for (const event of userData.events) {
+                const dateKey = event.createdAt.toLocaleDateString('en-US', {
+                    timeZone: 'Asia/Manila',
+                    month: 'numeric',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+
+                if (!dateEventsMap.has(dateKey)) {
+                    dateEventsMap.set(dateKey, { created: null, removed: null });
+                }
+
+                const timeStr = event.createdAt.toLocaleTimeString('en-US', {
+                    timeZone: 'Asia/Manila',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true
+                });
+
+                const dateEntry = dateEventsMap.get(dateKey)!;
+                if (event.eventType === 'session.created') {
+                    dateEntry.created = timeStr;
+                } else if (['session.ended', 'session.removed', 'session.revoked'].includes(event.eventType)) {
+                    dateEntry.removed = timeStr;
+                }
+            }
+
+            // Add date rows
+            for (const [date, times] of dateEventsMap) {
+                wsData.push([date, times.created || '', times.removed || '']);
+                totalRows++;
+            }
+
+            // Add empty row between users
+            wsData.push([]);
+        }
+
+        // Create worksheet
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+        // Auto-size columns
+        ws['!cols'] = [
+            { wch: 15 }, // Date
+            { wch: 18 }, // Session Created
+            { wch: 18 }, // Session Removed
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, 'User Activity');
+
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+        // Get application name for filename
+        const application = await prisma.application.findUnique({
+            where: { id: applicationId },
+            select: { name: true }
+        });
+
+        const appName = application?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'Unknown';
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `user_activity_${appName}_${timestamp}.xlsx`;
+
+        return {
+            success: true,
+            data: {
+                buffer,
+                filename,
+                count: totalRows
+            }
+        };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Get applications for filter dropdown (cached wrapper)
+export async function getApplicationsForFilter(): Promise<ActionResult<{ id: string; name: string }[]>> {
+    try {
+        const applications = await getApplicationsForFilterCached();
+        return { success: true, data: applications };
+    } catch {
         return { success: false, error: 'Failed to fetch applications' };
+    }
+}
+
+// Get users for filter dropdown
+export async function getUsersForFilter(): Promise<ActionResult<{ id: string; authUserId: string; firstName: string | null; lastName: string | null }[]>> {
+    try {
+        const users = await prisma.user.findMany({
+            select: { id: true, authUserId: true, firstName: true, lastName: true },
+            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
+        });
+        return { success: true, data: users };
+    } catch {
+        return { success: false, error: 'Failed to fetch users' };
+    }
+}
+
+// Get available event types (cached wrapper)
+export async function getEventTypes(): Promise<ActionResult<string[]>> {
+    try {
+        const types = await getEventTypesCached();
+        return { success: true, data: types };
+    } catch {
+        return { success: false, error: 'Failed to fetch event types' };
+    }
+}
+
+// Delete events (with safety checks)
+export async function deleteEvent(id: string): Promise<ActionResult> {
+    try {
+        if (!id) {
+            return { success: false, error: 'Event ID is required' };
+        }
+
+        await prisma.authEvent.delete({
+            where: { id }
+        });
+
+        return { success: true };
+    } catch (error) {
+        if (isPrismaError(error) && error.code === 'P2025') {
+            return { success: false, error: 'Event not found' };
+        }
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Bulk delete events (with limit for safety)
+export async function deleteEventsByFilter(
+    filters: EventFilters,
+    limit: number = 1000
+): Promise<ActionResult<{ deleted: number }>> {
+    try {
+        const where = buildWhereClause(filters);
+
+        // Get IDs to delete (limited for safety)
+        const events = await prisma.authEvent.findMany({
+            where,
+            select: { id: true },
+            take: limit
+        });
+
+        if (events.length === 0) {
+            return { success: true, data: { deleted: 0 } };
+        }
+
+        const result = await prisma.authEvent.deleteMany({
+            where: {
+                id: { in: events.map(e => e.id) }
+            }
+        });
+
+        return { success: true, data: { deleted: result.count } };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
     }
 }

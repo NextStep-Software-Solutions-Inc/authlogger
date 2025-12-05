@@ -36,8 +36,7 @@ export async function POST(req: Request, { params }: { params: Params }) {
             "svix-timestamp": svixTimestamp,
             "svix-signature": svixSignature,
         }) as WebhookEvent;
-    } catch (err) {
-        console.error('Error verifying webhook:', err);
+    } catch {
         return new Response('Error occured', { status: 400 });
     }
 
@@ -59,7 +58,6 @@ export async function POST(req: Request, { params }: { params: Params }) {
                         },
                     }
                 });
-                console.log(`User ${evt.data.user_id} logged in to ${appName}`);
                 break;
 
             case 'session.revoked':
@@ -77,7 +75,6 @@ export async function POST(req: Request, { params }: { params: Params }) {
                         application: { connect: { name: appName } }
                     },
                 });
-                console.log(`User ${evt.data.user_id} logged out of ${appName}`);
                 break;
             case 'user.created':
                 await prisma.authEvent.create({
@@ -97,7 +94,6 @@ export async function POST(req: Request, { params }: { params: Params }) {
                         eventType,
                     },
                 });
-                console.log(`User ${evt.data.id} created in ${appName}`);
                 break;
             case 'user.updated':
                 await prisma.$transaction(async (tx) => {
@@ -127,15 +123,14 @@ export async function POST(req: Request, { params }: { params: Params }) {
                     maxWait: 5000,
                     timeout: 10000,
                 });
-                console.log(`User ${evt.data.id} updated in ${appName}`);
                 break;
             default:
-                console.log(`Unhandled event type: ${eventType}`);
+                // Unhandled event type - silently ignore
+                break;
         }
 
         return NextResponse.json({ success: true, message: 'Webhook received' });
-    } catch (dbError) {
-        console.error('Database error:', dbError);
+    } catch {
         return new Response('Database error', { status: 500 });
     }
 }
