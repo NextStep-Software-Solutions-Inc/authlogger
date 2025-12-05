@@ -65,8 +65,8 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
                 if (item) {
                     setStoredValue(JSON.parse(item));
                 }
-            } catch (error) {
-                console.error(`Error reading localStorage key "${key}":`, error);
+            } catch {
+                // Silently fail on localStorage errors
             }
         }
     }, [key, mounted]);
@@ -79,8 +79,8 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
                 if (typeof window !== 'undefined') {
                     window.localStorage.setItem(key, JSON.stringify(valueToStore));
                 }
-            } catch (error) {
-                console.error(`Error setting localStorage key "${key}":`, error);
+            } catch {
+                // Silently fail on localStorage errors
             }
         },
         [key, storedValue]
@@ -221,8 +221,7 @@ export function useCopyToClipboard() {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
             return true;
-        } catch (error) {
-            console.error('Failed to copy:', error);
+        } catch {
             return false;
         }
     }, []);

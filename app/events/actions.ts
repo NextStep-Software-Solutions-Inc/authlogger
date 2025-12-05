@@ -194,7 +194,6 @@ export async function getEvents(
             }
         };
     } catch (error) {
-        console.error('Error fetching events:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
@@ -277,7 +276,6 @@ export async function getEventStats(
             }
         };
     } catch (error) {
-        console.error('Error fetching event stats:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
@@ -296,7 +294,6 @@ export async function getEventById(id: string): Promise<ActionResult<AuthEvent |
 
         return { success: true, data: event as AuthEvent | null };
     } catch (error) {
-        console.error('Error fetching event:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
@@ -346,7 +343,6 @@ export async function getEventsTrend(
 
         return { success: true, data: trend };
     } catch (error) {
-        console.error('Error fetching events trend:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
@@ -440,7 +436,6 @@ export async function exportFullEventsToExcel(
             }
         };
     } catch (error) {
-        console.error('Error exporting full events to Excel:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
@@ -526,7 +521,6 @@ export async function exportSimpleEventsToExcel(
             }
         };
     } catch (error) {
-        console.error('Error exporting simple events to Excel:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
@@ -667,7 +661,6 @@ export async function exportUserActivityToExcel(
             }
         };
     } catch (error) {
-        console.error('Error exporting user activity to Excel:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
@@ -677,8 +670,7 @@ export async function getApplicationsForFilter(): Promise<ActionResult<{ id: str
     try {
         const applications = await getApplicationsForFilterCached();
         return { success: true, data: applications };
-    } catch (error) {
-        console.error('Error fetching applications:', error);
+    } catch {
         return { success: false, error: 'Failed to fetch applications' };
     }
 }
@@ -691,8 +683,7 @@ export async function getUsersForFilter(): Promise<ActionResult<{ id: string; au
             orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
         });
         return { success: true, data: users };
-    } catch (error) {
-        console.error('Error fetching users:', error);
+    } catch {
         return { success: false, error: 'Failed to fetch users' };
     }
 }
@@ -702,8 +693,7 @@ export async function getEventTypes(): Promise<ActionResult<string[]>> {
     try {
         const types = await getEventTypesCached();
         return { success: true, data: types };
-    } catch (error) {
-        console.error('Error fetching event types:', error);
+    } catch {
         return { success: false, error: 'Failed to fetch event types' };
     }
 }
@@ -721,7 +711,6 @@ export async function deleteEvent(id: string): Promise<ActionResult> {
 
         return { success: true };
     } catch (error) {
-        console.error('Error deleting event:', error);
         if (isPrismaError(error) && error.code === 'P2025') {
             return { success: false, error: 'Event not found' };
         }
@@ -756,7 +745,6 @@ export async function deleteEventsByFilter(
 
         return { success: true, data: { deleted: result.count } };
     } catch (error) {
-        console.error('Error bulk deleting events:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -69,6 +70,9 @@ interface EventStats {
 }
 
 export default function EventsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [events, setEvents] = useState<AuthEvent[]>([]);
   const [stats, setStats] = useState<EventStats | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
@@ -79,8 +83,9 @@ export default function EventsPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [totalEvents, setTotalEvents] = useState(0);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
-  // Filter states
+  // Filter states - initialized from URL params
   const [selectedApplication, setSelectedApplication] = useState('');
   const [selectedEventType, setSelectedEventType] = useState('');
   const [selectedUser, setSelectedUser] = useState('');
@@ -93,6 +98,58 @@ export default function EventsPage() {
   const debouncedSearch = useDebounce(searchQuery, 300);
   const toast = useToast();
   const pageSize = 20;
+
+  // Initialize filters from URL params on mount
+  useEffect(() => {
+    const app = searchParams.get('app') || '';
+    const eventType = searchParams.get('eventType') || '';
+    const user = searchParams.get('user') || '';
+    const start = searchParams.get('startDate') || '';
+    const end = searchParams.get('endDate') || '';
+    const page = parseInt(searchParams.get('page') || '1', 10);
+
+    setSelectedApplication(app);
+    setSelectedEventType(eventType);
+    setSelectedUser(user);
+    setStartDate(start);
+    setEndDate(end);
+    setCurrentPage(page);
+    setIsInitialized(true);
+
+    // Show filters panel if any filter is active
+    if (app || eventType || user || start || end) {
+      setShowFilters(true);
+    }
+  }, []);
+
+  // Update URL when filters change
+  const updateUrlParams = useCallback((params: Record<string, string | number>) => {
+    const url = new URL(window.location.href);
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (value && value !== '' && value !== 1) {
+        url.searchParams.set(key, String(value));
+      } else {
+        url.searchParams.delete(key);
+      }
+    });
+
+    router.replace(url.pathname + url.search, { scroll: false });
+  }, [router]);
+
+  // Sync filters to URL
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    updateUrlParams({
+      app: selectedApplication,
+      eventType: selectedEventType,
+      user: selectedUser,
+      startDate: startDate,
+      endDate: endDate,
+      page: currentPage,
+    });
+  }, [selectedApplication, selectedEventType, selectedUser, startDate, endDate, currentPage, isInitialized, updateUrlParams]);
 
   // Close export menu on click outside
   useEffect(() => {
@@ -176,8 +233,10 @@ export default function EventsPage() {
   }, [loadInitialData]);
 
   useEffect(() => {
-    loadEvents();
-  }, [loadEvents]);
+    if (isInitialized) {
+      loadEvents();
+    }
+  }, [loadEvents, isInitialized]);
 
   const clearFilters = () => {
     setSelectedApplication('');
@@ -187,6 +246,8 @@ export default function EventsPage() {
     setEndDate('');
     setSearchQuery('');
     setCurrentPage(1);
+    // Clear URL params
+    router.replace('/events', { scroll: false });
   };
 
   const handleExport = async (exportType: 'full' | 'simple' | 'user-activity') => {

@@ -111,8 +111,6 @@ export async function createApplication(formData: FormData): Promise<ActionResul
 
         return { success: true, data: application };
     } catch (error: unknown) {
-        console.error('Error creating application:', error);
-
         if (isPrismaError(error) && error.code === PRISMA_ERROR_CODES.UNIQUE_CONSTRAINT) {
             return { success: false, error: 'An application with this name already exists' };
         }
@@ -125,8 +123,7 @@ export async function getApplications(): Promise<ActionResult<ApplicationWithSta
     try {
         const applications = await getApplicationsCached();
         return { success: true, data: applications };
-    } catch (error) {
-        console.error('Error fetching applications:', error);
+    } catch {
         return { success: false, error: 'Failed to fetch applications' };
     }
 }
@@ -140,8 +137,7 @@ export async function getApplicationById(id: string): Promise<ActionResult<Appli
 
         const application = await getApplicationByIdCached(id);
         return { success: true, data: application };
-    } catch (error) {
-        console.error('Error fetching application:', error);
+    } catch {
         return { success: false, error: 'Failed to fetch application' };
     }
 }
@@ -175,8 +171,6 @@ export async function updateApplication(formData: FormData): Promise<ActionResul
 
         return { success: true, data: application };
     } catch (error: unknown) {
-        console.error('Error updating application:', error);
-
         if (isPrismaError(error)) {
             if (error.code === PRISMA_ERROR_CODES.UNIQUE_CONSTRAINT) {
                 return { success: false, error: 'An application with this name already exists' };
@@ -220,8 +214,6 @@ export async function deleteApplication(formData: FormData): Promise<ActionResul
 
         return { success: true };
     } catch (error: unknown) {
-        console.error('Error deleting application:', error);
-
         if (isPrismaError(error) && error.code === PRISMA_ERROR_CODES.RECORD_NOT_FOUND) {
             return { success: false, error: 'Application not found' };
         }
@@ -249,8 +241,7 @@ export async function searchApplications(query: string): Promise<ActionResult<Ap
         });
 
         return { success: true, data: applications };
-    } catch (error) {
-        console.error('Error searching applications:', error);
+    } catch {
         return { success: false, error: 'Failed to search applications' };
     }
 }
@@ -299,8 +290,7 @@ export async function getApplicationStats(id: string): Promise<ActionResult<{
                 recentEvents
             }
         };
-    } catch (error) {
-        console.error('Error fetching application stats:', error);
+    } catch {
         return { success: false, error: 'Failed to fetch application statistics' };
     }
 }
