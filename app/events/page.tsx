@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -69,7 +69,7 @@ interface EventStats {
   recentActivity: AuthEvent[];
 }
 
-export default function EventsPage() {
+function EventsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -809,3 +809,28 @@ export default function EventsPage() {
     </AppLayout>
   );
 }
+
+// Wrapper component with Suspense boundary for useSearchParams
+function EventsPageWrapper() {
+  return (
+    <Suspense fallback={
+      <AppLayout>
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="animate-pulse">
+            <div className="h-8 bg-gray-200 rounded w-1/4 mb-8"></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-32 bg-gray-200 rounded-lg"></div>
+              ))}
+            </div>
+            <div className="h-96 bg-gray-200 rounded-lg"></div>
+          </div>
+        </div>
+      </AppLayout>
+    }>
+      <EventsPage />
+    </Suspense>
+  );
+}
+
+export default EventsPageWrapper;
