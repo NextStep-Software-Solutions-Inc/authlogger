@@ -364,13 +364,13 @@ export async function exportEventsToExcel(
                 ? `${event.user.firstName} ${event.user.lastName}`.trim()
                 : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User',
             'Event Type': event.eventType,
-            'Date': event.createdAt.toLocaleDateString('en-US', { 
+            'Date': event.createdAt.toLocaleDateString('en-US', {
                 timeZone: 'UTC',
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit'
             }),
-            'Time': event.createdAt.toLocaleTimeString('en-US', { 
+            'Time': event.createdAt.toLocaleTimeString('en-US', {
                 timeZone: 'UTC',
                 hour: '2-digit',
                 minute: '2-digit',
