@@ -60,6 +60,26 @@ function validateDateString(date: string | undefined): Date | null {
     return isNaN(parsed.getTime()) ? null : parsed;
 }
 
+// Parse date string to start of day in UTC
+function parseStartDate(dateStr: string | undefined): Date | null {
+    if (!dateStr) return null;
+    const parsed = new Date(dateStr);
+    if (isNaN(parsed.getTime())) return null;
+    // Set to start of day (00:00:00.000)
+    parsed.setHours(0, 0, 0, 0);
+    return parsed;
+}
+
+// Parse date string to end of day in UTC
+function parseEndDate(dateStr: string | undefined): Date | null {
+    if (!dateStr) return null;
+    const parsed = new Date(dateStr);
+    if (isNaN(parsed.getTime())) return null;
+    // Set to end of day (23:59:59.999)
+    parsed.setHours(23, 59, 59, 999);
+    return parsed;
+}
+
 function validatePagination(params: PaginationParams): { limit: number; offset: number } {
     const limit = Math.min(Math.max(1, params.limit || 50), 100); // 1-100 range
     const page = Math.max(1, params.page || 1);
@@ -83,8 +103,9 @@ function buildWhereClause(filters: EventFilters) {
         where.userId = filters.userId;
     }
 
-    const startDate = validateDateString(filters.startDate);
-    const endDate = validateDateString(filters.endDate);
+    // Use dedicated date parsing functions for consistent date range handling
+    const startDate = parseStartDate(filters.startDate);
+    const endDate = parseEndDate(filters.endDate);
 
     if (startDate || endDate) {
         where.createdAt = {};
@@ -92,10 +113,7 @@ function buildWhereClause(filters: EventFilters) {
             (where.createdAt as Record<string, Date>).gte = startDate;
         }
         if (endDate) {
-            // Set end date to end of day
-            const endOfDay = new Date(endDate);
-            endOfDay.setHours(23, 59, 59, 999);
-            (where.createdAt as Record<string, Date>).lte = endOfDay;
+            (where.createdAt as Record<string, Date>).lte = endDate;
         }
     }
 
@@ -430,14 +448,19 @@ export async function exportUserActivityToExcel(
             return { success: false, error: 'Application ID is required for export' };
         }
 
+        // Build the where clause with all filters
         const where = buildWhereClause({ applicationId, ...otherFilters });
+
+        // Only add session event type filter if no specific eventType filter is applied
+        // This ensures user's eventType filter is respected
+        const sessionEventTypes = ['session.created', 'session.ended', 'session.removed', 'session.revoked'];
+        const finalWhere = otherFilters.eventType
+            ? where // User specified an event type, use their filter
+            : { ...where, eventType: { in: sessionEventTypes } }; // Default to session events only
 
         // Limit export to 10,000 records for performance
         const events = await prisma.authEvent.findMany({
-            where: {
-                ...where,
-                eventType: { in: ['session.created', 'session.ended', 'session.removed', 'session.revoked'] }
-            },
+            where: finalWhere,
             include: eventInclude,
             orderBy: { createdAt: 'asc' },
             take: 10000
