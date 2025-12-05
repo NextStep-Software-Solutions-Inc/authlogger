@@ -351,8 +351,102 @@ export async function getEventsTrend(
     }
 }
 
-// Export events to Excel
-export async function exportEventsToExcel(
+// Export events to Excel - Full format with all details
+export async function exportFullEventsToExcel(
+    filters: EventFilters & { applicationId: string }
+): Promise<ActionResult<{ buffer: Buffer; filename: string; count: number }>> {
+    try {
+        const { applicationId, ...otherFilters } = filters;
+
+        if (!applicationId) {
+            return { success: false, error: 'Application ID is required for export' };
+        }
+
+        const where = buildWhereClause({ applicationId, ...otherFilters });
+
+        // Limit export to 10,000 records for performance
+        const events = await prisma.authEvent.findMany({
+            where,
+            include: eventInclude,
+            orderBy: { createdAt: 'desc' },
+            take: 10000
+        });
+
+        if (events.length === 0) {
+            return { success: false, error: 'No events to export' };
+        }
+
+        // Transform data for Excel - Full format with all details
+        const excelData = events.map(event => ({
+            'Event ID': event.id,
+            'Event Type': event.eventType,
+            'User ID': event.userId,
+            'User Name': event.user?.firstName && event.user?.lastName
+                ? `${event.user.firstName} ${event.user.lastName}`.trim()
+                : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User',
+            'Application': event.application?.name || 'Unknown',
+            'Timestamp': event.createdAt.toISOString(),
+            'Date': event.createdAt.toLocaleDateString('en-US', {
+                timeZone: 'Asia/Manila',
+                month: 'numeric',
+                day: 'numeric',
+                year: 'numeric'
+            }),
+            'Time': event.createdAt.toLocaleTimeString('en-US', {
+                timeZone: 'Asia/Manila',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            }),
+        }));
+
+        // Create workbook and worksheet
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(excelData);
+
+        // Auto-size columns
+        ws['!cols'] = [
+            { wch: 30 }, // Event ID
+            { wch: 18 }, // Event Type
+            { wch: 30 }, // User ID
+            { wch: 25 }, // User Name
+            { wch: 15 }, // Application
+            { wch: 26 }, // Timestamp
+            { wch: 12 }, // Date
+            { wch: 14 }, // Time
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, 'Events');
+
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+        // Get application name for filename
+        const application = await prisma.application.findUnique({
+            where: { id: applicationId },
+            select: { name: true }
+        });
+
+        const appName = application?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'Unknown';
+        const timestamp = new Date().toISOString().split('T')[0];
+        const filename = `auth_events_full_${appName}_${timestamp}.xlsx`;
+
+        return {
+            success: true,
+            data: {
+                buffer,
+                filename,
+                count: events.length
+            }
+        };
+    } catch (error) {
+        console.error('Error exporting full events to Excel:', error);
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Export events to Excel - Simple format with basic details
+export async function exportSimpleEventsToExcel(
     filters: EventFilters & { applicationId: string }
 ): Promise<ActionResult<{ buffer: Buffer; filename: string; count: number }>> {
     try {
@@ -383,14 +477,14 @@ export async function exportEventsToExcel(
                 : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User',
             'Event Type': event.eventType,
             'Date': event.createdAt.toLocaleDateString('en-US', {
-                timeZone: 'UTC',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit'
+                timeZone: 'Asia/Manila',
+                month: 'numeric',
+                day: 'numeric',
+                year: 'numeric'
             }),
             'Time': event.createdAt.toLocaleTimeString('en-US', {
-                timeZone: 'UTC',
-                hour: '2-digit',
+                timeZone: 'Asia/Manila',
+                hour: 'numeric',
                 minute: '2-digit',
                 second: '2-digit',
                 hour12: true
@@ -406,7 +500,7 @@ export async function exportEventsToExcel(
             { wch: 30 }, // UserName
             { wch: 20 }, // Event Type
             { wch: 12 }, // Date
-            { wch: 12 }, // Time
+            { wch: 14 }, // Time
         ];
 
         XLSX.utils.book_append_sheet(wb, ws, 'Events');
@@ -421,7 +515,7 @@ export async function exportEventsToExcel(
 
         const appName = application?.name?.replace(/[^a-zA-Z0-9]/g, '_') || 'Unknown';
         const timestamp = new Date().toISOString().split('T')[0];
-        const filename = `auth_events_${appName}_${timestamp}.xlsx`;
+        const filename = `auth_events_simple_${appName}_${timestamp}.xlsx`;
 
         return {
             success: true,
@@ -432,7 +526,7 @@ export async function exportEventsToExcel(
             }
         };
     } catch (error) {
-        console.error('Error exporting events to Excel:', error);
+        console.error('Error exporting simple events to Excel:', error);
         return { success: false, error: getPrismaErrorMessage(error) };
     }
 }

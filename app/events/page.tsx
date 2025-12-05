@@ -189,7 +189,7 @@ export default function EventsPage() {
     setCurrentPage(1);
   };
 
-  const handleExport = async (exportType: 'raw' | 'user-activity') => {
+  const handleExport = async (exportType: 'full' | 'simple' | 'user-activity') => {
     setShowExportMenu(false);
 
     if (!selectedApplication) {
@@ -328,13 +328,20 @@ export default function EventsPage() {
                 Export
               </Button>
               {showExportMenu && (
-                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
                   <button
                     className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-t-lg transition-colors"
-                    onClick={() => handleExport('raw')}
+                    onClick={() => handleExport('full')}
                   >
-                    <div className="font-medium">Raw Export</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">All events as-is</div>
+                    <div className="font-medium">Full Export</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">All columns including IDs & timestamps</div>
+                  </button>
+                  <button
+                    className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors border-t border-gray-200 dark:border-gray-700"
+                    onClick={() => handleExport('simple')}
+                  >
+                    <div className="font-medium">Simple Export</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Basic info: User, Event, Date, Time</div>
                   </button>
                   <button
                     className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-b-lg transition-colors border-t border-gray-200 dark:border-gray-700"
