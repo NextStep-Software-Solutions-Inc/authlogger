@@ -5,6 +5,8 @@ export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const applicationId = searchParams.get('applicationId');
+        const userId = searchParams.get('userId');
+        const eventType = searchParams.get('eventType');
         const startDate = searchParams.get('startDate');
         const endDate = searchParams.get('endDate');
 
@@ -14,6 +16,8 @@ export async function GET(request: NextRequest) {
 
         const result = await exportEventsToExcel({
             applicationId,
+            userId: userId || undefined,
+            eventType: eventType || undefined,
             startDate: startDate || undefined,
             endDate: endDate || undefined,
         });

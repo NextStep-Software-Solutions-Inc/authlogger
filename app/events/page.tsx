@@ -19,7 +19,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
 } from 'lucide-react';
-import { getEvents, getEventStats, getApplicationsForFilter } from './actions';
+import { getEvents, getEventStats, getApplicationsForFilter, getUsersForFilter } from './actions';
 import { AppLayout } from '../components/layout/AppLayout';
 import {
   Button,
@@ -45,6 +45,13 @@ interface Application {
   name: string;
 }
 
+interface User {
+  id: string;
+  authUserId: string;
+  firstName: string | null;
+  lastName: string | null;
+}
+
 interface AuthEvent {
   id: string;
   eventType: string;
@@ -65,6 +72,7 @@ export default function EventsPage() {
   const [events, setEvents] = useState<AuthEvent[]>([]);
   const [stats, setStats] = useState<EventStats | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -73,6 +81,7 @@ export default function EventsPage() {
   // Filter states
   const [selectedApplication, setSelectedApplication] = useState('');
   const [selectedEventType, setSelectedEventType] = useState('');
+  const [selectedUser, setSelectedUser] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,13 +104,18 @@ export default function EventsPage() {
   const loadInitialData = useCallback(async () => {
     try {
       setStatsLoading(true);
-      const [appsResult, statsResult] = await Promise.all([
+      const [appsResult, usersResult, statsResult] = await Promise.all([
         getApplicationsForFilter(),
+        getUsersForFilter(),
         getEventStats(),
       ]);
 
       if (appsResult.success && appsResult.data) {
         setApplications(appsResult.data);
+      }
+
+      if (usersResult.success && usersResult.data) {
+        setUsers(usersResult.data);
       }
 
       if (statsResult.success && statsResult.data) {
@@ -121,6 +135,7 @@ export default function EventsPage() {
         {
           applicationId: selectedApplication || undefined,
           eventType: selectedEventType || undefined,
+          userId: selectedUser || undefined,
           startDate: startDate || undefined,
           endDate: endDate || undefined,
         },
@@ -141,7 +156,7 @@ export default function EventsPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedApplication, selectedEventType, startDate, endDate, currentPage]);
+  }, [selectedApplication, selectedEventType, selectedUser, startDate, endDate, currentPage]);
 
   useEffect(() => {
     loadInitialData();
@@ -154,6 +169,7 @@ export default function EventsPage() {
   const clearFilters = () => {
     setSelectedApplication('');
     setSelectedEventType('');
+    setSelectedUser('');
     setStartDate('');
     setEndDate('');
     setSearchQuery('');
@@ -170,6 +186,8 @@ export default function EventsPage() {
     try {
       const params = new URLSearchParams({
         applicationId: selectedApplication,
+        ...(selectedUser && { userId: selectedUser }),
+        ...(selectedEventType && { eventType: selectedEventType }),
         ...(startDate && { startDate }),
         ...(endDate && { endDate }),
       });
@@ -213,7 +231,7 @@ export default function EventsPage() {
   };
 
   const totalPages = Math.ceil(totalEvents / pageSize);
-  const hasActiveFilters = selectedApplication || selectedEventType || startDate || endDate;
+  const hasActiveFilters = selectedApplication || selectedEventType || selectedUser || startDate || endDate;
 
   // Calculate stats
   const sessionEvents = useMemo(() => {
@@ -393,6 +411,22 @@ export default function EventsPage() {
               </div>
               <div className="flex-1 min-w-[200px] max-w-xs">
                 <Select
+                  value={selectedUser}
+                  onChange={(e) => {
+                    setSelectedUser(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  options={users.map(user => ({
+                    value: user.id,
+                    label: user.firstName && user.lastName
+                      ? `${user.firstName} ${user.lastName}`.trim()
+                      : user.firstName || user.lastName || user.authUserId.slice(0, 12) + '...'
+                  }))}
+                  placeholder="All Users"
+                />
+              </div>
+              <div className="flex-1 min-w-[200px] max-w-xs">
+                <Select
                   value={selectedEventType}
                   onChange={(e) => {
                     setSelectedEventType(e.target.value);
@@ -475,7 +509,7 @@ export default function EventsPage() {
 
           {loading ? (
             <div className="p-6">
-              <SkeletonTable rows={5} columns={4} />
+              <SkeletonTable rows={5} columns={6} />
             </div>
           ) : events.length === 0 ? (
             <EmptyState
@@ -510,7 +544,13 @@ export default function EventsPage() {
                         Application
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Time
+                      </th>
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Time Ago
                       </th>
                     </tr>
                   </thead>
@@ -560,6 +600,26 @@ export default function EventsPage() {
                             <td className="px-6 py-4">
                               <span className="text-sm text-gray-700 dark:text-gray-300">
                                 {event.application.name}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="text-sm text-gray-700 dark:text-gray-300">
+                                {event.createdAt.toLocaleDateString('en-US', {
+                                  timeZone: 'Asia/Manila',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="text-sm text-gray-700 dark:text-gray-300">
+                                {event.createdAt.toLocaleTimeString('en-US', {
+                                  timeZone: 'Asia/Manila',
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true
+                                })}
                               </span>
                             </td>
                             <td className="px-6 py-4">

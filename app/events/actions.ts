@@ -358,18 +358,25 @@ export async function exportEventsToExcel(
             return { success: false, error: 'No events to export' };
         }
 
-        // Transform data for Excel
+        // Transform data for Excel - simplified template with only UserName, Event Type, Date, Time
         const excelData = events.map(event => ({
-            'Event ID': event.id,
+            'UserName': event.user?.firstName && event.user?.lastName
+                ? `${event.user.firstName} ${event.user.lastName}`.trim()
+                : event.user?.firstName || event.user?.lastName || event.user?.authUserId || 'Unknown User',
             'Event Type': event.eventType,
-            'User ID': event.userId,
-            'User Name': event.user?.firstName && event.user?.lastName
-                ? `${event.user.firstName} ${event.user.lastName}`
-                : event.user?.authUserId || 'Unknown User',
-            'Application': event.application.name,
-            'Timestamp': event.createdAt.toISOString(),
-            'Date': event.createdAt.toLocaleDateString('en-US', { timeZone: 'UTC' }),
-            'Time': event.createdAt.toLocaleTimeString('en-US', { timeZone: 'UTC' }),
+            'Date': event.createdAt.toLocaleDateString('en-US', { 
+                timeZone: 'UTC',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }),
+            'Time': event.createdAt.toLocaleTimeString('en-US', { 
+                timeZone: 'UTC',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            }),
         }));
 
         // Create workbook and worksheet
@@ -378,12 +385,8 @@ export async function exportEventsToExcel(
 
         // Auto-size columns
         ws['!cols'] = [
-            { wch: 36 }, // Event ID
+            { wch: 30 }, // UserName
             { wch: 20 }, // Event Type
-            { wch: 36 }, // User ID
-            { wch: 30 }, // User Name
-            { wch: 25 }, // Application
-            { wch: 24 }, // Timestamp
             { wch: 12 }, // Date
             { wch: 12 }, // Time
         ];
@@ -424,6 +427,20 @@ export async function getApplicationsForFilter(): Promise<ActionResult<{ id: str
     } catch (error) {
         console.error('Error fetching applications:', error);
         return { success: false, error: 'Failed to fetch applications' };
+    }
+}
+
+// Get users for filter dropdown
+export async function getUsersForFilter(): Promise<ActionResult<{ id: string; authUserId: string; firstName: string | null; lastName: string | null }[]>> {
+    try {
+        const users = await prisma.user.findMany({
+            select: { id: true, authUserId: true, firstName: true, lastName: true },
+            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
+        });
+        return { success: true, data: users };
+    } catch (error) {
+        console.error('Error fetching users:', error);
+        return { success: false, error: 'Failed to fetch users' };
     }
 }
 
