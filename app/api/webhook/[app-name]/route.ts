@@ -60,7 +60,9 @@ export async function POST(req: Request, { params }: { params: Params }) {
     if (clerkEventTimestamp && typeof clerkEventTimestamp === 'number') {
         eventMs = clerkEventTimestamp < 1e11 ? clerkEventTimestamp * 1000 : clerkEventTimestamp;
     }
-    const eventDate = new Date(eventMs);
+    // timeStamp (BigInt ms) = When the event REALLY occurred in Clerk (payload.timestamp)
+    // createdAt (DateTime) = When the event REACHED OUR SERVER (Server Delivery Receipt time)
+    const serverReceiptDate = new Date();
 
     try {
         // Handle the event
@@ -70,7 +72,7 @@ export async function POST(req: Request, { params }: { params: Params }) {
                     data: {
                         eventType,
                         timeStamp: BigInt(eventMs),
-                        createdAt: eventDate,
+                        createdAt: serverReceiptDate,
                         application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
@@ -89,7 +91,7 @@ export async function POST(req: Request, { params }: { params: Params }) {
                     data: {
                         eventType,
                         timeStamp: BigInt(eventMs),
-                        createdAt: eventDate,
+                        createdAt: serverReceiptDate,
                         application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
@@ -106,7 +108,7 @@ export async function POST(req: Request, { params }: { params: Params }) {
                     data: {
                         eventType,
                         timeStamp: BigInt(eventMs),
-                        createdAt: eventDate,
+                        createdAt: serverReceiptDate,
                         application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
@@ -129,7 +131,7 @@ export async function POST(req: Request, { params }: { params: Params }) {
                         data: {
                             eventType,
                             timeStamp: BigInt(eventMs),
-                            createdAt: eventDate,
+                            createdAt: serverReceiptDate,
                             application: { connect: { name: appName } },
                             user: { connect: { authUserId: evt.data.id } },
                         }

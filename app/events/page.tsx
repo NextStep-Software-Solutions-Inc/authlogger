@@ -54,6 +54,7 @@ interface AuthEvent {
   userId: string;
   applicationId: string;
   createdAt: Date;
+  timeStamp?: bigint | number;
   application: { id: string; name: string };
   user: { id: string; authUserId: string; firstName: string | null; lastName: string | null } | null;
 }
@@ -645,13 +646,13 @@ function EventsPage() {
                         Application
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Date
+                        Occurred At (Clerk)
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Time
+                        Delivered At (Server)
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Time Ago
+                        Status
                       </th>
                     </tr>
                   </thead>
@@ -660,6 +661,11 @@ function EventsPage() {
                       {events.map((event, index) => {
                         const colors = getEventTypeColor(event.eventType);
                         const Icon = getEventIcon(event.eventType);
+                        const occurredDate = new Date(Number(event.timeStamp || event.createdAt));
+                        const deliveredDate = new Date(event.createdAt);
+                        const diffMinutes = Math.abs(deliveredDate.getTime() - occurredDate.getTime()) / (1000 * 60);
+                        const isReplayed = diffMinutes > 5;
+
                         return (
                           <motion.tr
                             key={event.id}
@@ -674,16 +680,18 @@ function EventsPage() {
                                 <div className={cn('p-2 rounded-lg', colors.bg)}>
                                   <Icon className={cn('w-4 h-4', colors.text)} />
                                 </div>
-                                <Badge
-                                  variant={
-                                    event.eventType.includes('created') ? 'success' :
-                                      event.eventType.includes('ended') || event.eventType.includes('revoked') ? 'danger' :
-                                        'default'
-                                  }
-                                  size="sm"
-                                >
-                                  {event.eventType}
-                                </Badge>
+                                <div className="flex flex-col gap-1">
+                                  <Badge
+                                    variant={
+                                      event.eventType.includes('created') ? 'success' :
+                                        event.eventType.includes('ended') || event.eventType.includes('revoked') ? 'danger' :
+                                          'default'
+                                    }
+                                    size="sm"
+                                  >
+                                    {event.eventType}
+                                  </Badge>
+                                </div>
                               </div>
                             </td>
                             <td className="px-6 py-4">
@@ -704,30 +712,63 @@ function EventsPage() {
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              <span className="text-sm text-gray-700 dark:text-gray-300">
-                                {event.createdAt.toLocaleDateString('en-US', {
-                                  timeZone: 'Asia/Manila',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric'
-                                })}
-                              </span>
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium text-gray-900 dark:text-white">
+                                  {occurredDate.toLocaleDateString('en-US', {
+                                    timeZone: 'Asia/Manila',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric'
+                                  })}
+                                </span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {occurredDate.toLocaleTimeString('en-US', {
+                                    timeZone: 'Asia/Manila',
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                    hour12: true
+                                  })}
+                                </span>
+                              </div>
                             </td>
                             <td className="px-6 py-4">
-                              <span className="text-sm text-gray-700 dark:text-gray-300">
-                                {event.createdAt.toLocaleTimeString('en-US', {
-                                  timeZone: 'Asia/Manila',
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })}
-                              </span>
+                              <div className="flex flex-col">
+                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                                  {deliveredDate.toLocaleDateString('en-US', {
+                                    timeZone: 'Asia/Manila',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric'
+                                  })}
+                                </span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {deliveredDate.toLocaleTimeString('en-US', {
+                                    timeZone: 'Asia/Manila',
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                    hour12: true
+                                  })}
+                                </span>
+                              </div>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-300">
-                                <Clock className="w-4 h-4" />
-                                <span title={formatDateTime(event.createdAt)}>
-                                  {getRelativeTime(event.createdAt)}
+                              <div className="flex flex-col gap-1">
+                                {isReplayed ? (
+                                  <Badge
+                                    variant="warning"
+                                    size="sm"
+                                    className="w-fit cursor-help"
+                                    title={`Replayed Webhook\nOccurred: ${formatDateTime(occurredDate)}\nDelivered: ${formatDateTime(deliveredDate)}`}
+                                  >
+                                    🔄 Replayed
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="success" size="sm" className="w-fit">
+                                    ⚡ Live
+                                  </Badge>
+                                )}
+                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                                  {getRelativeTime(occurredDate)}
                                 </span>
                               </div>
                             </td>

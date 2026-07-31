@@ -12,6 +12,7 @@ interface BadgeProps {
     size?: BadgeSize;
     dot?: boolean;
     pulse?: boolean;
+    title?: string;
     className?: string;
 }
 
@@ -51,10 +52,12 @@ export function Badge({
     size = 'md',
     dot = false,
     pulse = false,
+    title,
     className,
 }: BadgeProps) {
     return (
         <motion.span
+            title={title}
             variants={badgeVariants}
             initial="initial"
             animate="animate"

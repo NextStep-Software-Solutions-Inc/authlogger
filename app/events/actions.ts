@@ -27,6 +27,7 @@ export interface AuthEvent {
     userId: string;
     applicationId: string;
     createdAt: Date;
+    timeStamp: bigint | number;
     application: {
         id: string;
         name: string;
