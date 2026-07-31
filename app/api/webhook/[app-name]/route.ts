@@ -42,10 +42,19 @@ export async function POST(req: Request, { params }: { params: Params }) {
 
     const eventType = evt.type;
 
-    // Strictly use Clerk's top-level event occurrence timestamp (`payload.timestamp`).
-    // This represents the exact datetime when the event occurred in Clerk, regardless of delivery retries or replays.
-    const rawEvt = evt as unknown as { timestamp?: number; data?: { created_at?: number; updated_at?: number } };
-    const clerkEventTimestamp = rawEvt.timestamp ?? rawEvt.data?.created_at;
+    // Extract exact event timestamp using sample payload structure reference:
+    // Priority 1: Top-level payload.timestamp (e.g. 1785473923937 in sample) - Event occurrence time
+    // Priority 2: Inner payload.data.created_at or payload.data.updated_at (e.g. 1785473923864 in sample)
+    const payloadRef = evt as unknown as { 
+        timestamp?: number; 
+        data?: { 
+            created_at?: number; 
+            updated_at?: number;
+            last_active_at?: number;
+        } 
+    };
+
+    const clerkEventTimestamp = payloadRef.timestamp ?? payloadRef.data?.created_at ?? payloadRef.data?.updated_at ?? payloadRef.data?.last_active_at;
     
     let eventMs = Date.now();
     if (clerkEventTimestamp && typeof clerkEventTimestamp === 'number') {
