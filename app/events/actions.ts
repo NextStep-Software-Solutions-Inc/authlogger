@@ -174,7 +174,7 @@ export async function getEvents(
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { timeStamp: 'desc' },
                 take: limit,
                 skip: offset,
             }),
@@ -201,10 +201,11 @@ export async function getEventStats(
     try {
         const where = buildWhereClause(filters);
 
+        // Compute today/week start timestamps in Asia/Manila (+08:00)
         const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const weekStart = new Date(todayStart);
-        weekStart.setDate(weekStart.getDate() - 7);
+        const manilaDateStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' }); // YYYY-MM-DD
+        const todayStartMs = new Date(`${manilaDateStr}T00:00:00.000+08:00`).getTime();
+        const weekStartMs = todayStartMs - 7 * 24 * 60 * 60 * 1000;
 
         const [
             totalEvents,
@@ -229,31 +230,30 @@ export async function getEventStats(
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { timeStamp: 'desc' },
                 take: 10
             }),
 
-            // Today's events
+            // Today's events (using timeStamp index)
             prisma.authEvent.count({
                 where: {
                     ...where,
-                    createdAt: { gte: todayStart }
+                    timeStamp: { gte: BigInt(todayStartMs) }
                 }
             }),
 
-            // This week's events
+            // This week's events (using timeStamp index)
             prisma.authEvent.count({
                 where: {
                     ...where,
-                    createdAt: { gte: weekStart }
+                    timeStamp: { gte: BigInt(weekStartMs) }
                 }
             }),
 
-            // Unique users
-            prisma.authEvent.findMany({
-                where,
-                select: { userId: true },
-                distinct: ['userId']
+            // Unique users via DB aggregation
+            prisma.authEvent.groupBy({
+                by: ['userId'],
+                where
             }).then(users => users.length)
         ]);
 
@@ -301,34 +301,34 @@ export async function getEventsTrend(
 ): Promise<ActionResult<{ date: string; count: number }[]>> {
     try {
         const where = buildWhereClause(filters);
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
-        startDate.setHours(0, 0, 0, 0);
+        const now = new Date();
+        const manilaDateStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
+        const startMs = new Date(`${manilaDateStr}T00:00:00.000+08:00`).getTime() - (days * 24 * 60 * 60 * 1000);
 
-        // Get events within date range
+        // Get events within date range using timeStamp index
         const events = await prisma.authEvent.findMany({
             where: {
                 ...where,
-                createdAt: { gte: startDate }
+                timeStamp: { gte: BigInt(startMs) }
             },
             select: { createdAt: true },
-            orderBy: { createdAt: 'asc' }
+            orderBy: { timeStamp: 'asc' }
         });
 
         // Group by date
         const countsByDate = new Map<string, number>();
 
         // Initialize all dates with 0
+        const startDate = new Date(startMs);
         for (let i = 0; i <= days; i++) {
-            const date = new Date(startDate);
-            date.setDate(date.getDate() + i);
-            const dateStr = date.toISOString().split('T')[0];
+            const date = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
+            const dateStr = date.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
             countsByDate.set(dateStr, 0);
         }
 
-        // Count events per date
+        // Count events per date in Manila timezone
         events.forEach(event => {
-            const dateStr = event.createdAt.toISOString().split('T')[0];
+            const dateStr = event.createdAt.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
             countsByDate.set(dateStr, (countsByDate.get(dateStr) || 0) + 1);
         });
 
