@@ -20,7 +20,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
 } from 'lucide-react';
-import { getEvents, getEventStats, getApplicationsForFilter, getUsersForFilter } from './actions';
+import { getEvents, getEventStats, getApplicationsForFilter } from './actions';
 import { AppLayout } from '../components/layout/AppLayout';
 import {
   Button,
@@ -36,6 +36,7 @@ import {
   SkeletonStats,
   SkeletonTable,
   useToast,
+  UserCombobox,
 } from '../components/ui';
 import { EventsByTypeChart } from '../components/charts/EventCharts';
 import { useDebounce } from '../lib/hooks';
@@ -44,13 +45,6 @@ import { cn, getEventTypeColor, formatDateTime, getRelativeTime, formatNumber } 
 interface Application {
   id: string;
   name: string;
-}
-
-interface User {
-  id: string;
-  authUserId: string;
-  firstName: string | null;
-  lastName: string | null;
 }
 
 interface AuthEvent {
@@ -76,7 +70,6 @@ function EventsPage() {
   const [events, setEvents] = useState<AuthEvent[]>([]);
   const [stats, setStats] = useState<EventStats | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -174,18 +167,13 @@ function EventsPage() {
   const loadInitialData = useCallback(async () => {
     try {
       setStatsLoading(true);
-      const [appsResult, usersResult, statsResult] = await Promise.all([
+      const [appsResult, statsResult] = await Promise.all([
         getApplicationsForFilter(),
-        getUsersForFilter(),
         getEventStats(),
       ]);
 
       if (appsResult.success && appsResult.data) {
         setApplications(appsResult.data);
-      }
-
-      if (usersResult.success && usersResult.data) {
-        setUsers(usersResult.data);
       }
 
       if (statsResult.success && statsResult.data) {
@@ -520,18 +508,12 @@ function EventsPage() {
                 />
               </div>
               <div className="flex-1 min-w-[200px] max-w-xs">
-                <Select
+                <UserCombobox
                   value={selectedUser}
-                  onChange={(e) => {
-                    setSelectedUser(e.target.value);
+                  onChange={(userId) => {
+                    setSelectedUser(userId);
                     setCurrentPage(1);
                   }}
-                  options={users.map(user => ({
-                    value: user.id,
-                    label: user.firstName && user.lastName
-                      ? `${user.firstName} ${user.lastName}`.trim()
-                      : user.firstName || user.lastName || user.authUserId.slice(0, 12) + '...'
-                  }))}
                   placeholder="All Users"
                 />
               </div>

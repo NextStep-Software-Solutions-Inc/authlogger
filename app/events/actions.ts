@@ -60,24 +60,20 @@ function validateDateString(date: string | undefined): Date | null {
     return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-// Parse date string to start of day in UTC
-function parseStartDate(dateStr: string | undefined): Date | null {
+// Parse date string ('YYYY-MM-DD' or ISO) to start of day in Asia/Manila (00:00:00.000 +08:00) as epoch timestamp in milliseconds
+function parseManilaStartDateToMs(dateStr: string | undefined): number | null {
     if (!dateStr) return null;
-    const parsed = new Date(dateStr);
-    if (isNaN(parsed.getTime())) return null;
-    // Set to start of day (00:00:00.000)
-    parsed.setHours(0, 0, 0, 0);
-    return parsed;
+    const isoStr = dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00.000+08:00`;
+    const parsed = new Date(isoStr);
+    return isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
-// Parse date string to end of day in UTC
-function parseEndDate(dateStr: string | undefined): Date | null {
+// Parse date string ('YYYY-MM-DD' or ISO) to end of day in Asia/Manila (23:59:59.999 +08:00) as epoch timestamp in milliseconds
+function parseManilaEndDateToMs(dateStr: string | undefined): number | null {
     if (!dateStr) return null;
-    const parsed = new Date(dateStr);
-    if (isNaN(parsed.getTime())) return null;
-    // Set to end of day (23:59:59.999)
-    parsed.setHours(23, 59, 59, 999);
-    return parsed;
+    const isoStr = dateStr.includes('T') ? dateStr : `${dateStr}T23:59:59.999+08:00`;
+    const parsed = new Date(isoStr);
+    return isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
 function validatePagination(params: PaginationParams): { limit: number; offset: number } {
@@ -103,17 +99,17 @@ function buildWhereClause(filters: EventFilters) {
         where.userId = filters.userId;
     }
 
-    // Use dedicated date parsing functions for consistent date range handling
-    const startDate = parseStartDate(filters.startDate);
-    const endDate = parseEndDate(filters.endDate);
+    // Use timestamp BigInt filtering based on Asia/Manila (+08:00) timezone boundaries
+    const startMs = parseManilaStartDateToMs(filters.startDate);
+    const endMs = parseManilaEndDateToMs(filters.endDate);
 
-    if (startDate || endDate) {
-        where.createdAt = {};
-        if (startDate) {
-            (where.createdAt as Record<string, Date>).gte = startDate;
+    if (startMs !== null || endMs !== null) {
+        where.timeStamp = {};
+        if (startMs !== null) {
+            (where.timeStamp as Record<string, bigint>).gte = BigInt(startMs);
         }
-        if (endDate) {
-            (where.createdAt as Record<string, Date>).lte = endDate;
+        if (endMs !== null) {
+            (where.timeStamp as Record<string, bigint>).lte = BigInt(endMs);
         }
     }
 
@@ -675,16 +671,61 @@ export async function getApplicationsForFilter(): Promise<ActionResult<{ id: str
     }
 }
 
-// Get users for filter dropdown
-export async function getUsersForFilter(): Promise<ActionResult<{ id: string; authUserId: string; firstName: string | null; lastName: string | null }[]>> {
+export interface UserFilterOption {
+    id: string;
+    authUserId: string;
+    firstName: string | null;
+    lastName: string | null;
+}
+
+// Get users for filter dropdown (legacy wrapper with limit)
+export async function getUsersForFilter(): Promise<ActionResult<UserFilterOption[]>> {
+    return searchUsersForFilter('', 20);
+}
+
+// Search users for autocomplete combo box with query filter and limit
+export async function searchUsersForFilter(
+    query?: string,
+    limit: number = 20
+): Promise<ActionResult<UserFilterOption[]>> {
     try {
+        const trimmedQuery = query?.trim() || '';
+        
+        const where: Record<string, unknown> = {};
+        if (trimmedQuery) {
+            where.OR = [
+                { firstName: { contains: trimmedQuery, mode: 'insensitive' } },
+                { lastName: { contains: trimmedQuery, mode: 'insensitive' } },
+                { authUserId: { contains: trimmedQuery, mode: 'insensitive' } },
+            ];
+        }
+
         const users = await prisma.user.findMany({
+            where,
             select: { id: true, authUserId: true, firstName: true, lastName: true },
-            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
+            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+            take: Math.min(Math.max(1, limit), 50),
         });
+
         return { success: true, data: users };
-    } catch {
-        return { success: false, error: 'Failed to fetch users' };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Get single user by ID for filter initial state
+export async function getUserByIdForFilter(
+    id: string
+): Promise<ActionResult<UserFilterOption | null>> {
+    try {
+        if (!id) return { success: true, data: null };
+        const user = await prisma.user.findUnique({
+            where: { id },
+            select: { id: true, authUserId: true, firstName: true, lastName: true }
+        });
+        return { success: true, data: user };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
 
