@@ -21,6 +21,24 @@ function getRawBody(req) {
 }
 
 /**
+ * Format timestamp ms to ISO UTC and Manila Local string
+ */
+function formatMs(ms) {
+  if (!ms) return null;
+  const num = typeof ms === 'string' ? Number(ms) : ms;
+  if (isNaN(num)) return null;
+  // Handle 10-digit sec vs 13-digit ms
+  const normalizedMs = num < 1e11 ? num * 1000 : num;
+  const d = new Date(normalizedMs);
+  if (isNaN(d.getTime())) return null;
+  return {
+    raw: num,
+    utc: d.toISOString(),
+    manila: d.toLocaleString('en-US', { timeZone: 'Asia/Manila' })
+  };
+}
+
+/**
  * HTTP Server Handler
  */
 const server = http.createServer(async (req, res) => {
@@ -53,8 +71,7 @@ const server = http.createServer(async (req, res) => {
       const svixSignature = headers['svix-signature'];
 
       const receivedAtMs = Date.now();
-      const receivedAtUtc = new Date(receivedAtMs).toISOString();
-      const receivedAtManila = new Date(receivedAtMs).toLocaleString('en-US', { timeZone: 'Asia/Manila' });
+      const serverReceived = formatMs(receivedAtMs);
 
       let payload = {};
       try {
@@ -63,7 +80,7 @@ const server = http.createServer(async (req, res) => {
         payload = { raw: rawBody };
       }
 
-      // Verify signature if WEBHOOK_SECRET environment variable is set
+      // Verify signature if secret key is configured
       const secretKey = process.env[`WEBHOOK_SECRET_${appName.toUpperCase()}`] || process.env.WEBHOOK_SECRET;
       let signatureVerified = false;
       if (secretKey && svixId && svixTimestamp && svixSignature) {
@@ -82,38 +99,38 @@ const server = http.createServer(async (req, res) => {
 
       const eventType = payload.type || 'unknown';
       const eventData = payload.data || {};
-      
-      // Extract Clerk's event timestamps if available
-      const clerkCreatedAt = eventData.created_at || eventData.last_active_at || payload.object?.created_at || null;
-      let clerkCreatedAtUtc = null;
-      let clerkCreatedAtManila = null;
-      if (clerkCreatedAt) {
-        const ms = typeof clerkCreatedAt === 'number' && clerkCreatedAt < 1e11 ? clerkCreatedAt * 1000 : clerkCreatedAt;
-        const d = new Date(ms);
-        if (!isNaN(d.getTime())) {
-          clerkCreatedAtUtc = d.toISOString();
-          clerkCreatedAtManila = d.toLocaleString('en-US', { timeZone: 'Asia/Manila' });
-        }
-      }
+      const userData = eventData.user || {};
+
+      // Extract User Information
+      const userId = eventData.user_id || eventData.id || 'N/A';
+      const userName = (userData.first_name || userData.last_name) 
+        ? `${userData.first_name || ''} ${userData.last_name || ''}`.trim() 
+        : 'N/A';
+      const userEmail = userData.email_addresses?.[0]?.email_address || 'N/A';
+
+      // Timestamps Extraction
+      const clerkTopLevelTimestamp = formatMs(payload.timestamp);
+      const clerkDataCreatedAt = formatMs(eventData.created_at);
+      const svixHeaderTimestamp = formatMs(svixTimestamp);
 
       const capturedRecord = {
         id: svixId || `evt_${receivedAtMs}_${Math.random().toString(36).substr(2, 6)}`,
         appName,
         eventType,
         signatureVerified,
-        svixTimestamp: svixTimestamp || null,
-        userId: eventData.user_id || eventData.id || 'N/A',
-        clerkCreatedAtRaw: clerkCreatedAt,
-        clerkCreatedAtUtc,
-        clerkCreatedAtManila,
-        serverReceivedAtMs: receivedAtMs,
-        serverReceivedAtUtc: receivedAtUtc,
-        serverReceivedAtManila: receivedAtManila,
+        userId,
+        userName,
+        userEmail,
+        clerkTopLevelTimestamp,
+        clerkDataCreatedAt,
+        svixHeaderTimestamp,
+        serverReceived,
+        rawPayload: payload,
       };
 
       capturedEvents.unshift(capturedRecord); // Keep newest first
 
-      console.log(`[Captured Webhook #${capturedEvents.length}] App: ${appName} | Type: ${eventType} | Server Time: ${receivedAtManila} | Clerk Time: ${clerkCreatedAtManila || 'N/A'}`);
+      console.log(`[Captured Webhook #${capturedEvents.length}] App: ${appName} | Type: ${eventType} | User: ${userName} (${userId}) | Clerk Event Time: ${clerkTopLevelTimestamp?.manila || clerkDataCreatedAt?.manila || 'N/A'}`);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, message: 'Webhook captured in memory', capturedRecord }));
@@ -180,22 +197,13 @@ const server = http.createServer(async (req, res) => {
         <div id="statTypes" class="text-3xl font-extrabold text-indigo-400 mt-1">0</div>
       </div>
       <div class="bg-slate-800/80 border border-slate-700 p-4 rounded-xl">
-        <div class="text-xs font-semibold text-slate-400 uppercase">Earliest Event Timestamp</div>
+        <div class="text-xs font-semibold text-slate-400 uppercase">Earliest Clerk Timestamp</div>
         <div id="statEarliest" class="text-xs font-mono text-emerald-400 mt-2 truncate">N/A</div>
       </div>
       <div class="bg-slate-800/80 border border-slate-700 p-4 rounded-xl">
-        <div class="text-xs font-semibold text-slate-400 uppercase">Latest Event Timestamp</div>
+        <div class="text-xs font-semibold text-slate-400 uppercase">Latest Clerk Timestamp</div>
         <div id="statLatest" class="text-xs font-mono text-cyan-400 mt-2 truncate">N/A</div>
       </div>
-    </div>
-
-    <!-- Webhook Endpoint URL helper -->
-    <div class="bg-slate-800/60 border border-slate-700 p-4 rounded-xl text-sm flex items-center justify-between">
-      <div>
-        <span class="font-semibold text-indigo-300">Webhook Target Endpoint:</span>
-        <code class="ml-2 bg-slate-900 px-2 py-1 rounded text-pink-400 font-mono">POST http://&lt;your-host&gt;:${PORT}/webhook/app-name</code>
-      </div>
-      <span class="text-xs text-slate-400">Events are captured in-memory only and discarded upon reset.</span>
     </div>
 
     <!-- Table -->
@@ -206,10 +214,10 @@ const server = http.createServer(async (req, res) => {
             <th class="p-3">#</th>
             <th class="p-3">App</th>
             <th class="p-3">Event Type</th>
-            <th class="p-3">User ID</th>
-            <th class="p-3">Server Received (Manila +08:00)</th>
-            <th class="p-3">Clerk Event Created (Manila +08:00)</th>
-            <th class="p-3">Svix Header</th>
+            <th class="p-3">User</th>
+            <th class="p-3">Clerk Event Timestamp (`payload.timestamp`)</th>
+            <th class="p-3">Data `created_at`</th>
+            <th class="p-3">Server Received (+08:00)</th>
           </tr>
         </thead>
         <tbody id="eventsTableBody" class="divide-y divide-slate-700/60 font-mono text-xs text-slate-200">
@@ -239,8 +247,10 @@ const server = http.createServer(async (req, res) => {
       document.getElementById('statTypes').innerText = eventTypes.size;
 
       if (events.length > 0) {
-        document.getElementById('statLatest').innerText = events[0].serverReceivedAtManila;
-        document.getElementById('statEarliest').innerText = events[events.length - 1].serverReceivedAtManila;
+        const latestTime = events[0].clerkTopLevelTimestamp?.manila || events[0].serverReceived?.manila;
+        const earliestTime = events[events.length - 1].clerkTopLevelTimestamp?.manila || events[events.length - 1].serverReceived?.manila;
+        document.getElementById('statLatest').innerText = latestTime;
+        document.getElementById('statEarliest').innerText = earliestTime;
       } else {
         document.getElementById('statLatest').innerText = 'N/A';
         document.getElementById('statEarliest').innerText = 'N/A';
@@ -257,10 +267,13 @@ const server = http.createServer(async (req, res) => {
           <td class="p-3 text-slate-400 font-semibold">\${events.length - idx}</td>
           <td class="p-3"><span class="px-2 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-sans text-xs">\${e.appName}</span></td>
           <td class="p-3"><span class="px-2 py-0.5 rounded bg-slate-700 text-slate-200 font-semibold">\${e.eventType}</span></td>
-          <td class="p-3 text-slate-300">\${e.userId}</td>
-          <td class="p-3 text-emerald-400 font-semibold">\${e.serverReceivedAtManila}</td>
-          <td class="p-3 text-cyan-300">\${e.clerkCreatedAtManila || 'N/A'}</td>
-          <td class="p-3 text-slate-400 text-[10px] truncate max-w-[120px]">\${e.svixTimestamp || 'N/A'}</td>
+          <td class="p-3 font-sans">
+            <div class="font-semibold text-slate-200">\${e.userName}</div>
+            <div class="text-[10px] text-slate-400 font-mono">\${e.userEmail !== 'N/A' ? e.userEmail : e.userId}</div>
+          </td>
+          <td class="p-3 text-cyan-300 font-semibold">\${e.clerkTopLevelTimestamp?.manila || 'N/A'}<br><span class="text-[10px] text-slate-400">\${e.clerkTopLevelTimestamp?.utc || ''}</span></td>
+          <td class="p-3 text-indigo-300">\${e.clerkDataCreatedAt?.manila || 'N/A'}<br><span class="text-[10px] text-slate-400">\${e.clerkDataCreatedAt?.utc || ''}</span></td>
+          <td class="p-3 text-emerald-400">\${e.serverReceived?.manila}<br><span class="text-[10px] text-slate-400">\${e.serverReceived?.utc}</span></td>
         </tr>
       \`).join('');
     }
@@ -272,7 +285,6 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // Auto-refresh every 2 seconds
     setInterval(fetchEvents, 2000);
     fetchEvents();
   </script>
