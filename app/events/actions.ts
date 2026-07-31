@@ -186,7 +186,11 @@ const fetchEventsPage1Cached = unstable_cache(
         const [events, total] = await Promise.all([
             prisma.authEvent.findMany({
                 include: eventInclude,
-                orderBy: { timeStamp: 'desc' },
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
                 take: limit,
                 skip: 0,
             }),
@@ -217,7 +221,11 @@ export async function getEvents(
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { timeStamp: 'desc' },
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
                 take: limit,
                 skip: offset,
             }),
@@ -261,7 +269,11 @@ const fetchOverviewStatsCached = unstable_cache(
             }),
             prisma.authEvent.findMany({
                 include: eventInclude,
-                orderBy: { timeStamp: 'desc' },
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
                 take: 10
             }),
             prisma.authEvent.count({
@@ -328,7 +340,11 @@ export async function getEventStats(
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { timeStamp: 'desc' },
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
                 take: 10
             }),
 
