@@ -221,10 +221,12 @@ function EventsPage() {
     }
   }, [selectedApplications, selectedEventTypes, selectedUsers, startDate, endDate, currentPage]);
 
+  // Load initial apps & stats once on mount
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
 
+  // Load events when initialized or filters/page change
   useEffect(() => {
     if (isInitialized) {
       loadEvents();
