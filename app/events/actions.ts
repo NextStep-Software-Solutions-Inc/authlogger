@@ -5,12 +5,13 @@ import { unstable_cache } from 'next/cache';
 import * as XLSX from 'xlsx';
 
 // Types
+// Types
 export interface EventFilters {
-    applicationId?: string;
-    eventType?: string;
+    applicationId?: string | string[];
+    eventType?: string | string[];
     startDate?: string;
     endDate?: string;
-    userId?: string;
+    userId?: string | string[];
     search?: string;
 }
 
@@ -53,6 +54,20 @@ interface ActionResult<T = void> {
     data?: T;
 }
 
+// Helper to normalize filter inputs (string, CSV string, or array)
+function parseArrayOrCsv(val: string | string[] | undefined): string[] | undefined {
+    if (!val) return undefined;
+    if (Array.isArray(val)) {
+        const filtered = val.filter(Boolean);
+        return filtered.length > 0 ? filtered : undefined;
+    }
+    if (typeof val === 'string') {
+        const parts = val.split(',').map(s => s.trim()).filter(Boolean);
+        return parts.length > 0 ? parts : undefined;
+    }
+    return undefined;
+}
+
 // Validation helpers
 function validateDateString(date: string | undefined): Date | null {
     if (!date) return null;
@@ -60,24 +75,20 @@ function validateDateString(date: string | undefined): Date | null {
     return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-// Parse date string to start of day in UTC
-function parseStartDate(dateStr: string | undefined): Date | null {
+// Parse date string ('YYYY-MM-DD' or ISO) to start of day in Asia/Manila (00:00:00.000 +08:00) as epoch timestamp in milliseconds
+function parseManilaStartDateToMs(dateStr: string | undefined): number | null {
     if (!dateStr) return null;
-    const parsed = new Date(dateStr);
-    if (isNaN(parsed.getTime())) return null;
-    // Set to start of day (00:00:00.000)
-    parsed.setHours(0, 0, 0, 0);
-    return parsed;
+    const isoStr = dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00.000+08:00`;
+    const parsed = new Date(isoStr);
+    return isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
-// Parse date string to end of day in UTC
-function parseEndDate(dateStr: string | undefined): Date | null {
+// Parse date string ('YYYY-MM-DD' or ISO) to end of day in Asia/Manila (23:59:59.999 +08:00) as epoch timestamp in milliseconds
+function parseManilaEndDateToMs(dateStr: string | undefined): number | null {
     if (!dateStr) return null;
-    const parsed = new Date(dateStr);
-    if (isNaN(parsed.getTime())) return null;
-    // Set to end of day (23:59:59.999)
-    parsed.setHours(23, 59, 59, 999);
-    return parsed;
+    const isoStr = dateStr.includes('T') ? dateStr : `${dateStr}T23:59:59.999+08:00`;
+    const parsed = new Date(isoStr);
+    return isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
 function validatePagination(params: PaginationParams): { limit: number; offset: number } {
@@ -91,29 +102,32 @@ function validatePagination(params: PaginationParams): { limit: number; offset: 
 function buildWhereClause(filters: EventFilters) {
     const where: Record<string, unknown> = {};
 
-    if (filters.applicationId) {
-        where.applicationId = filters.applicationId;
+    const appIds = parseArrayOrCsv(filters.applicationId);
+    if (appIds) {
+        where.applicationId = appIds.length === 1 ? appIds[0] : { in: appIds };
     }
 
-    if (filters.eventType) {
-        where.eventType = filters.eventType;
+    const eventTypes = parseArrayOrCsv(filters.eventType);
+    if (eventTypes) {
+        where.eventType = eventTypes.length === 1 ? eventTypes[0] : { in: eventTypes };
     }
 
-    if (filters.userId) {
-        where.userId = filters.userId;
+    const userIds = parseArrayOrCsv(filters.userId);
+    if (userIds) {
+        where.userId = userIds.length === 1 ? userIds[0] : { in: userIds };
     }
 
-    // Use dedicated date parsing functions for consistent date range handling
-    const startDate = parseStartDate(filters.startDate);
-    const endDate = parseEndDate(filters.endDate);
+    // Use timestamp BigInt filtering based on Asia/Manila (+08:00) timezone boundaries
+    const startMs = parseManilaStartDateToMs(filters.startDate);
+    const endMs = parseManilaEndDateToMs(filters.endDate);
 
-    if (startDate || endDate) {
-        where.createdAt = {};
-        if (startDate) {
-            (where.createdAt as Record<string, Date>).gte = startDate;
+    if (startMs !== null || endMs !== null) {
+        where.timeStamp = {};
+        if (startMs !== null) {
+            (where.timeStamp as Record<string, bigint>).gte = BigInt(startMs);
         }
-        if (endDate) {
-            (where.createdAt as Record<string, Date>).lte = endDate;
+        if (endMs !== null) {
+            (where.timeStamp as Record<string, bigint>).lte = BigInt(endMs);
         }
     }
 
@@ -178,7 +192,7 @@ export async function getEvents(
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { timeStamp: 'desc' },
                 take: limit,
                 skip: offset,
             }),
@@ -205,10 +219,11 @@ export async function getEventStats(
     try {
         const where = buildWhereClause(filters);
 
+        // Compute today/week start timestamps in Asia/Manila (+08:00)
         const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const weekStart = new Date(todayStart);
-        weekStart.setDate(weekStart.getDate() - 7);
+        const manilaDateStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' }); // YYYY-MM-DD
+        const todayStartMs = new Date(`${manilaDateStr}T00:00:00.000+08:00`).getTime();
+        const weekStartMs = todayStartMs - 7 * 24 * 60 * 60 * 1000;
 
         const [
             totalEvents,
@@ -233,31 +248,30 @@ export async function getEventStats(
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { timeStamp: 'desc' },
                 take: 10
             }),
 
-            // Today's events
+            // Today's events (using timeStamp index)
             prisma.authEvent.count({
                 where: {
                     ...where,
-                    createdAt: { gte: todayStart }
+                    timeStamp: { gte: BigInt(todayStartMs) }
                 }
             }),
 
-            // This week's events
+            // This week's events (using timeStamp index)
             prisma.authEvent.count({
                 where: {
                     ...where,
-                    createdAt: { gte: weekStart }
+                    timeStamp: { gte: BigInt(weekStartMs) }
                 }
             }),
 
-            // Unique users
-            prisma.authEvent.findMany({
-                where,
-                select: { userId: true },
-                distinct: ['userId']
+            // Unique users via DB aggregation
+            prisma.authEvent.groupBy({
+                by: ['userId'],
+                where
             }).then(users => users.length)
         ]);
 
@@ -305,34 +319,34 @@ export async function getEventsTrend(
 ): Promise<ActionResult<{ date: string; count: number }[]>> {
     try {
         const where = buildWhereClause(filters);
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
-        startDate.setHours(0, 0, 0, 0);
+        const now = new Date();
+        const manilaDateStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
+        const startMs = new Date(`${manilaDateStr}T00:00:00.000+08:00`).getTime() - (days * 24 * 60 * 60 * 1000);
 
-        // Get events within date range
+        // Get events within date range using timeStamp index
         const events = await prisma.authEvent.findMany({
             where: {
                 ...where,
-                createdAt: { gte: startDate }
+                timeStamp: { gte: BigInt(startMs) }
             },
             select: { createdAt: true },
-            orderBy: { createdAt: 'asc' }
+            orderBy: { timeStamp: 'asc' }
         });
 
         // Group by date
         const countsByDate = new Map<string, number>();
 
         // Initialize all dates with 0
+        const startDate = new Date(startMs);
         for (let i = 0; i <= days; i++) {
-            const date = new Date(startDate);
-            date.setDate(date.getDate() + i);
-            const dateStr = date.toISOString().split('T')[0];
+            const date = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
+            const dateStr = date.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
             countsByDate.set(dateStr, 0);
         }
 
-        // Count events per date
+        // Count events per date in Manila timezone
         events.forEach(event => {
-            const dateStr = event.createdAt.toISOString().split('T')[0];
+            const dateStr = event.createdAt.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
             countsByDate.set(dateStr, (countsByDate.get(dateStr) || 0) + 1);
         });
 
@@ -675,16 +689,61 @@ export async function getApplicationsForFilter(): Promise<ActionResult<{ id: str
     }
 }
 
-// Get users for filter dropdown
-export async function getUsersForFilter(): Promise<ActionResult<{ id: string; authUserId: string; firstName: string | null; lastName: string | null }[]>> {
+export interface UserFilterOption {
+    id: string;
+    authUserId: string;
+    firstName: string | null;
+    lastName: string | null;
+}
+
+// Get users for filter dropdown (legacy wrapper with limit)
+export async function getUsersForFilter(): Promise<ActionResult<UserFilterOption[]>> {
+    return searchUsersForFilter('', 20);
+}
+
+// Search users for autocomplete combo box with query filter and limit
+export async function searchUsersForFilter(
+    query?: string,
+    limit: number = 20
+): Promise<ActionResult<UserFilterOption[]>> {
     try {
+        const trimmedQuery = query?.trim() || '';
+        
+        const where: Record<string, unknown> = {};
+        if (trimmedQuery) {
+            where.OR = [
+                { firstName: { contains: trimmedQuery, mode: 'insensitive' } },
+                { lastName: { contains: trimmedQuery, mode: 'insensitive' } },
+                { authUserId: { contains: trimmedQuery, mode: 'insensitive' } },
+            ];
+        }
+
         const users = await prisma.user.findMany({
+            where,
             select: { id: true, authUserId: true, firstName: true, lastName: true },
-            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
+            orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+            take: Math.min(Math.max(1, limit), 50),
+        });
+
+        return { success: true, data: users };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
+    }
+}
+
+// Get multiple users by IDs for filter initial state
+export async function getUsersByIdsForFilter(
+    ids: string[]
+): Promise<ActionResult<UserFilterOption[]>> {
+    try {
+        if (!ids || ids.length === 0) return { success: true, data: [] };
+        const users = await prisma.user.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, authUserId: true, firstName: true, lastName: true }
         });
         return { success: true, data: users };
-    } catch {
-        return { success: false, error: 'Failed to fetch users' };
+    } catch (error) {
+        return { success: false, error: getPrismaErrorMessage(error) };
     }
 }
 

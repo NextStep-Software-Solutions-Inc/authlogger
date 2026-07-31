@@ -9,37 +9,37 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.36.0",
+    "@clerk/nextjs": "^6.39.6",
     "@prisma/client": "^6.19.0",
     "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
-    "framer-motion": "^12.23.25",
+    "date-fns": "^4.4.0",
+    "framer-motion": "^12.43.0",
     "lucide-react": "^0.555.0",
-    "next": "16.0.10",
-    "react": "19.2.1",
-    "react-dom": "19.2.1",
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "recharts": "^3.5.1",
-    "svix": "^1.82.0",
-    "tailwind-merge": "^3.4.0",
+    "svix": "^1.99.1",
+    "tailwind-merge": "^3.6.0",
     "xlsx": "^0.18.5",
-    "zustand": "^5.0.9"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.3",
-    "@tailwindcss/postcss": "^4.1.17",
+    "@eslint/eslintrc": "^3.3.6",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^20.19.25",
-    "@types/react": "19.2.7",
-    "@types/react-dom": "19.2.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "eslint": "^9.39.1",
-    "eslint-config-next": "16.0.7",
+    "eslint-config-next": "^16.2.12",
     "prisma": "^6.19.0",
-    "tailwindcss": "^4.1.17",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3"
   },
   "pnpm": {
     "overrides": {
-      "@types/react": "19.2.7",
-      "@types/react-dom": "19.2.3"
+      "@types/react": "^19.2.18",
+      "@types/react-dom": "^19.2.4"
     }
   }
 }

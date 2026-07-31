@@ -259,7 +259,7 @@ export async function getApplicationStats(id: string): Promise<ActionResult<{
         }
 
         const now = new Date();
-        const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const last24HoursMs = now.getTime() - 24 * 60 * 60 * 1000;
 
         const [totalEvents, eventsByType, recentEvents] = await Promise.all([
             prisma.authEvent.count({
@@ -274,7 +274,7 @@ export async function getApplicationStats(id: string): Promise<ActionResult<{
             prisma.authEvent.count({
                 where: {
                     applicationId: id,
-                    createdAt: { gte: last24Hours }
+                    timeStamp: { gte: BigInt(last24HoursMs) }
                 }
             })
         ]);

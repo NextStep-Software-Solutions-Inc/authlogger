@@ -20,7 +20,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
 } from 'lucide-react';
-import { getEvents, getEventStats, getApplicationsForFilter, getUsersForFilter } from './actions';
+import { getEvents, getEventStats, getApplicationsForFilter } from './actions';
 import { AppLayout } from '../components/layout/AppLayout';
 import {
   Button,
@@ -36,6 +36,8 @@ import {
   SkeletonStats,
   SkeletonTable,
   useToast,
+  UserCombobox,
+  MultiSelect,
 } from '../components/ui';
 import { EventsByTypeChart } from '../components/charts/EventCharts';
 import { useDebounce } from '../lib/hooks';
@@ -44,13 +46,6 @@ import { cn, getEventTypeColor, formatDateTime, getRelativeTime, formatNumber } 
 interface Application {
   id: string;
   name: string;
-}
-
-interface User {
-  id: string;
-  authUserId: string;
-  firstName: string | null;
-  lastName: string | null;
 }
 
 interface AuthEvent {
@@ -76,7 +71,6 @@ function EventsPage() {
   const [events, setEvents] = useState<AuthEvent[]>([]);
   const [stats, setStats] = useState<EventStats | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -85,10 +79,10 @@ function EventsPage() {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Filter states - initialized from URL params
-  const [selectedApplication, setSelectedApplication] = useState('');
-  const [selectedEventType, setSelectedEventType] = useState('');
-  const [selectedUser, setSelectedUser] = useState('');
+  // Filter states - initialized from URL params (multi-select arrays)
+  const [selectedApplications, setSelectedApplications] = useState<string[]>([]);
+  const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -101,23 +95,27 @@ function EventsPage() {
 
   // Initialize filters from URL params on mount
   useEffect(() => {
-    const app = searchParams.get('app') || '';
-    const eventType = searchParams.get('eventType') || '';
-    const user = searchParams.get('user') || '';
+    const appStr = searchParams.get('app') || '';
+    const eventTypeStr = searchParams.get('eventType') || '';
+    const userStr = searchParams.get('user') || '';
     const start = searchParams.get('startDate') || '';
     const end = searchParams.get('endDate') || '';
     const page = parseInt(searchParams.get('page') || '1', 10);
 
-    setSelectedApplication(app);
-    setSelectedEventType(eventType);
-    setSelectedUser(user);
+    const apps = appStr ? appStr.split(',').filter(Boolean) : [];
+    const eventTypes = eventTypeStr ? eventTypeStr.split(',').filter(Boolean) : [];
+    const users = userStr ? userStr.split(',').filter(Boolean) : [];
+
+    setSelectedApplications(apps);
+    setSelectedEventTypes(eventTypes);
+    setSelectedUsers(users);
     setStartDate(start);
     setEndDate(end);
     setCurrentPage(page);
     setIsInitialized(true);
 
     // Show filters panel if any filter is active
-    if (app || eventType || user || start || end) {
+    if (apps.length > 0 || eventTypes.length > 0 || users.length > 0 || start || end) {
       setShowFilters(true);
     }
   }, []);
@@ -142,14 +140,14 @@ function EventsPage() {
     if (!isInitialized) return;
 
     updateUrlParams({
-      app: selectedApplication,
-      eventType: selectedEventType,
-      user: selectedUser,
+      app: selectedApplications.join(','),
+      eventType: selectedEventTypes.join(','),
+      user: selectedUsers.join(','),
       startDate: startDate,
       endDate: endDate,
       page: currentPage,
     });
-  }, [selectedApplication, selectedEventType, selectedUser, startDate, endDate, currentPage, isInitialized, updateUrlParams]);
+  }, [selectedApplications, selectedEventTypes, selectedUsers, startDate, endDate, currentPage, isInitialized, updateUrlParams]);
 
   // Close export menu on click outside
   useEffect(() => {
@@ -174,18 +172,13 @@ function EventsPage() {
   const loadInitialData = useCallback(async () => {
     try {
       setStatsLoading(true);
-      const [appsResult, usersResult, statsResult] = await Promise.all([
+      const [appsResult, statsResult] = await Promise.all([
         getApplicationsForFilter(),
-        getUsersForFilter(),
         getEventStats(),
       ]);
 
       if (appsResult.success && appsResult.data) {
         setApplications(appsResult.data);
-      }
-
-      if (usersResult.success && usersResult.data) {
-        setUsers(usersResult.data);
       }
 
       if (statsResult.success && statsResult.data) {
@@ -203,9 +196,9 @@ function EventsPage() {
     try {
       const result = await getEvents(
         {
-          applicationId: selectedApplication || undefined,
-          eventType: selectedEventType || undefined,
-          userId: selectedUser || undefined,
+          applicationId: selectedApplications.length > 0 ? selectedApplications : undefined,
+          eventType: selectedEventTypes.length > 0 ? selectedEventTypes : undefined,
+          userId: selectedUsers.length > 0 ? selectedUsers : undefined,
           startDate: startDate || undefined,
           endDate: endDate || undefined,
         },
@@ -226,7 +219,7 @@ function EventsPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedApplication, selectedEventType, selectedUser, startDate, endDate, currentPage]);
+  }, [selectedApplications, selectedEventTypes, selectedUsers, startDate, endDate, currentPage]);
 
   useEffect(() => {
     loadInitialData();
@@ -239,9 +232,9 @@ function EventsPage() {
   }, [loadEvents, isInitialized]);
 
   const clearFilters = () => {
-    setSelectedApplication('');
-    setSelectedEventType('');
-    setSelectedUser('');
+    setSelectedApplications([]);
+    setSelectedEventTypes([]);
+    setSelectedUsers([]);
     setStartDate('');
     setEndDate('');
     setSearchQuery('');
@@ -253,13 +246,13 @@ function EventsPage() {
   const handleExport = async (exportType: 'full' | 'simple' | 'user-activity') => {
     setShowExportMenu(false);
 
-    if (!selectedApplication) {
-      toast.warning('Please select an application to export');
+    if (selectedApplications.length === 0) {
+      toast.warning('Please select at least one application to export');
       return;
     }
 
     // Check if any filter is applied
-    const hasFilters = selectedUser || selectedEventType || startDate || endDate;
+    const hasFilters = selectedUsers.length > 0 || selectedEventTypes.length > 0 || startDate || endDate;
     if (!hasFilters) {
       toast.warning('Please apply at least one filter (User, Event Type, or Date range) before exporting');
       return;
@@ -268,10 +261,10 @@ function EventsPage() {
     setExporting(true);
     try {
       const params = new URLSearchParams({
-        applicationId: selectedApplication,
+        applicationId: selectedApplications[0], // Export primary selected app or join
         exportType,
-        ...(selectedUser && { userId: selectedUser }),
-        ...(selectedEventType && { eventType: selectedEventType }),
+        ...(selectedUsers.length > 0 && { userId: selectedUsers.join(',') }),
+        ...(selectedEventTypes.length > 0 && { eventType: selectedEventTypes.join(',') }),
         ...(startDate && { startDate }),
         ...(endDate && { endDate }),
       });
@@ -315,7 +308,7 @@ function EventsPage() {
   };
 
   const totalPages = Math.ceil(totalEvents / pageSize);
-  const hasActiveFilters = selectedApplication || selectedEventType || selectedUser || startDate || endDate;
+  const hasActiveFilters = selectedApplications.length > 0 || selectedEventTypes.length > 0 || selectedUsers.length > 0 || startDate || endDate;
 
   // Calculate stats
   const sessionEvents = useMemo(() => {
@@ -507,39 +500,35 @@ function EventsPage() {
         <Card variant="glass" className="mb-8">
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center gap-4">
-              {/* Quick filters */}
+              {/* Applications MultiSelect */}
               <div className="flex-1 min-w-[200px] max-w-xs">
-                <Select
-                  value={selectedApplication}
-                  onChange={(e) => {
-                    setSelectedApplication(e.target.value);
+                <MultiSelect
+                  value={selectedApplications}
+                  onChange={(vals) => {
+                    setSelectedApplications(vals);
                     setCurrentPage(1);
                   }}
                   options={applications.map(app => ({ value: app.id, label: app.name }))}
                   placeholder="All Applications"
                 />
               </div>
+              {/* Users Combobox MultiSelect */}
               <div className="flex-1 min-w-[200px] max-w-xs">
-                <Select
-                  value={selectedUser}
-                  onChange={(e) => {
-                    setSelectedUser(e.target.value);
+                <UserCombobox
+                  value={selectedUsers}
+                  onChange={(userIds) => {
+                    setSelectedUsers(userIds);
                     setCurrentPage(1);
                   }}
-                  options={users.map(user => ({
-                    value: user.id,
-                    label: user.firstName && user.lastName
-                      ? `${user.firstName} ${user.lastName}`.trim()
-                      : user.firstName || user.lastName || user.authUserId.slice(0, 12) + '...'
-                  }))}
                   placeholder="All Users"
                 />
               </div>
+              {/* Event Types MultiSelect */}
               <div className="flex-1 min-w-[200px] max-w-xs">
-                <Select
-                  value={selectedEventType}
-                  onChange={(e) => {
-                    setSelectedEventType(e.target.value);
+                <MultiSelect
+                  value={selectedEventTypes}
+                  onChange={(vals) => {
+                    setSelectedEventTypes(vals);
                     setCurrentPage(1);
                   }}
                   options={eventTypes}

@@ -20,6 +20,8 @@ model User {
 
   logs      Log[]
   authEvents AuthEvent[]
+
+  @@index([firstName, lastName])
 }
 
 model Application {
@@ -39,6 +41,8 @@ model Log {
   createdAt     DateTime  @default(now())
 
   user          User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model AuthEvent {
@@ -51,4 +55,10 @@ model AuthEvent {
   application Application @relation(fields: [applicationId], references: [id])
   user      User     @relation(fields: [userId], references: [id])
   timeStamp BigInt   @default(dbgenerated("(extract(epoch from now()) * 1000)::bigint")) @db.BigInt
+
+  @@index([timeStamp(sort: Desc)])
+  @@index([applicationId, timeStamp(sort: Desc)])
+  @@index([userId, timeStamp(sort: Desc)])
+  @@index([eventType, timeStamp(sort: Desc)])
+  @@index([applicationId, eventType, timeStamp(sort: Desc)])
 }
