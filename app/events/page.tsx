@@ -646,13 +646,16 @@ function EventsPage() {
                         Application
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Occurred At (Clerk)
+                        Date
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Delivered At (Server)
+                        Time
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Status
+                        Delivered At
+                      </th>
+                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Time Ago
                       </th>
                     </tr>
                   </thead>
@@ -712,62 +715,50 @@ function EventsPage() {
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <span className="text-sm font-medium text-gray-900 dark:text-white">
-                                  {occurredDate.toLocaleDateString('en-US', {
-                                    timeZone: 'Asia/Manila',
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric'
-                                  })}
-                                </span>
-                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                  {occurredDate.toLocaleTimeString('en-US', {
-                                    timeZone: 'Asia/Manila',
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                    hour12: true
-                                  })}
-                                </span>
-                              </div>
+                              <span className="text-sm text-gray-700 dark:text-gray-300">
+                                {occurredDate.toLocaleDateString('en-US', {
+                                  timeZone: 'Asia/Manila',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })}
+                              </span>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex flex-col">
+                              <span className="text-sm text-gray-700 dark:text-gray-300">
+                                {occurredDate.toLocaleTimeString('en-US', {
+                                  timeZone: 'Asia/Manila',
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true
+                                })}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col gap-0.5">
                                 <span className="text-sm text-gray-700 dark:text-gray-300">
                                   {deliveredDate.toLocaleDateString('en-US', {
                                     timeZone: 'Asia/Manila',
                                     month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric'
-                                  })}
-                                </span>
-                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                  {deliveredDate.toLocaleTimeString('en-US', {
+                                    day: 'numeric'
+                                  })}, {deliveredDate.toLocaleTimeString('en-US', {
                                     timeZone: 'Asia/Manila',
                                     hour: 'numeric',
                                     minute: '2-digit',
                                     hour12: true
                                   })}
                                 </span>
+                                {isReplayed && (
+                                  <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                    🔄 Replayed
+                                  </span>
+                                )}
                               </div>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex flex-col gap-1">
-                                {isReplayed ? (
-                                  <Badge
-                                    variant="warning"
-                                    size="sm"
-                                    className="w-fit cursor-help"
-                                    title={`Replayed Webhook\nOccurred: ${formatDateTime(occurredDate)}\nDelivered: ${formatDateTime(deliveredDate)}`}
-                                  >
-                                    🔄 Replayed
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="success" size="sm" className="w-fit">
-                                    ⚡ Live
-                                  </Badge>
-                                )}
-                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-300">
+                                <Clock className="w-4 h-4" />
+                                <span title={formatDateTime(occurredDate)}>
                                   {getRelativeTime(occurredDate)}
                                 </span>
                               </div>
