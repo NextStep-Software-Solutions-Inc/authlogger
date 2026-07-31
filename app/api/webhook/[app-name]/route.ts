@@ -42,6 +42,16 @@ export async function POST(req: Request, { params }: { params: Params }) {
 
     const eventType = evt.type;
 
+    // Extract exact event occurrence timestamp from Clerk payload (or fallback to Date.now())
+    const rawEvt = evt as unknown as { timestamp?: number; data?: { created_at?: number; last_active_at?: number } };
+    const clerkTimeRaw = rawEvt.timestamp || rawEvt.data?.created_at || rawEvt.data?.last_active_at;
+    
+    let eventMs = Date.now();
+    if (clerkTimeRaw && typeof clerkTimeRaw === 'number') {
+        eventMs = clerkTimeRaw < 1e11 ? clerkTimeRaw * 1000 : clerkTimeRaw;
+    }
+    const eventDate = new Date(eventMs);
+
     try {
         // Handle the event
         switch (eventType) {
@@ -49,6 +59,8 @@ export async function POST(req: Request, { params }: { params: Params }) {
                 await prisma.authEvent.create({
                     data: {
                         eventType,
+                        timeStamp: BigInt(eventMs),
+                        createdAt: eventDate,
                         application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
@@ -65,20 +77,26 @@ export async function POST(req: Request, { params }: { params: Params }) {
             case 'session.ended':
                 await prisma.authEvent.create({
                     data: {
+                        eventType,
+                        timeStamp: BigInt(eventMs),
+                        createdAt: eventDate,
+                        application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
                                 where: { authUserId: evt.data.user_id },
                                 create: { authUserId: evt.data.user_id }
                             }
                         },
-                        eventType,
-                        application: { connect: { name: appName } }
                     },
                 });
                 break;
+
             case 'user.created':
                 await prisma.authEvent.create({
                     data: {
+                        eventType,
+                        timeStamp: BigInt(eventMs),
+                        createdAt: eventDate,
                         application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
@@ -91,15 +109,17 @@ export async function POST(req: Request, { params }: { params: Params }) {
                                 }
                             }
                         },
-                        eventType,
                     },
                 });
                 break;
+
             case 'user.updated':
                 await prisma.$transaction(async (tx) => {
                     await tx.authEvent.create({
                         data: {
                             eventType,
+                            timeStamp: BigInt(eventMs),
+                            createdAt: eventDate,
                             application: { connect: { name: appName } },
                             user: { connect: { authUserId: evt.data.id } },
                         }
