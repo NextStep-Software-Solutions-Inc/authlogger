@@ -5,12 +5,13 @@ import { unstable_cache } from 'next/cache';
 import * as XLSX from 'xlsx';
 
 // Types
+// Types
 export interface EventFilters {
-    applicationId?: string;
-    eventType?: string;
+    applicationId?: string | string[];
+    eventType?: string | string[];
     startDate?: string;
     endDate?: string;
-    userId?: string;
+    userId?: string | string[];
     search?: string;
 }
 
@@ -53,6 +54,20 @@ interface ActionResult<T = void> {
     data?: T;
 }
 
+// Helper to normalize filter inputs (string, CSV string, or array)
+function parseArrayOrCsv(val: string | string[] | undefined): string[] | undefined {
+    if (!val) return undefined;
+    if (Array.isArray(val)) {
+        const filtered = val.filter(Boolean);
+        return filtered.length > 0 ? filtered : undefined;
+    }
+    if (typeof val === 'string') {
+        const parts = val.split(',').map(s => s.trim()).filter(Boolean);
+        return parts.length > 0 ? parts : undefined;
+    }
+    return undefined;
+}
+
 // Validation helpers
 function validateDateString(date: string | undefined): Date | null {
     if (!date) return null;
@@ -87,16 +102,19 @@ function validatePagination(params: PaginationParams): { limit: number; offset: 
 function buildWhereClause(filters: EventFilters) {
     const where: Record<string, unknown> = {};
 
-    if (filters.applicationId) {
-        where.applicationId = filters.applicationId;
+    const appIds = parseArrayOrCsv(filters.applicationId);
+    if (appIds) {
+        where.applicationId = appIds.length === 1 ? appIds[0] : { in: appIds };
     }
 
-    if (filters.eventType) {
-        where.eventType = filters.eventType;
+    const eventTypes = parseArrayOrCsv(filters.eventType);
+    if (eventTypes) {
+        where.eventType = eventTypes.length === 1 ? eventTypes[0] : { in: eventTypes };
     }
 
-    if (filters.userId) {
-        where.userId = filters.userId;
+    const userIds = parseArrayOrCsv(filters.userId);
+    if (userIds) {
+        where.userId = userIds.length === 1 ? userIds[0] : { in: userIds };
     }
 
     // Use timestamp BigInt filtering based on Asia/Manila (+08:00) timezone boundaries
@@ -713,17 +731,17 @@ export async function searchUsersForFilter(
     }
 }
 
-// Get single user by ID for filter initial state
-export async function getUserByIdForFilter(
-    id: string
-): Promise<ActionResult<UserFilterOption | null>> {
+// Get multiple users by IDs for filter initial state
+export async function getUsersByIdsForFilter(
+    ids: string[]
+): Promise<ActionResult<UserFilterOption[]>> {
     try {
-        if (!id) return { success: true, data: null };
-        const user = await prisma.user.findUnique({
-            where: { id },
+        if (!ids || ids.length === 0) return { success: true, data: [] };
+        const users = await prisma.user.findMany({
+            where: { id: { in: ids } },
             select: { id: true, authUserId: true, firstName: true, lastName: true }
         });
-        return { success: true, data: user };
+        return { success: true, data: users };
     } catch (error) {
         return { success: false, error: getPrismaErrorMessage(error) };
     }

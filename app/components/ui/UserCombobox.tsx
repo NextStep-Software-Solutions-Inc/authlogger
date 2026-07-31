@@ -5,18 +5,18 @@ import { createPortal } from 'react-dom';
 import { User as UserIcon, X, Check, Loader2, ChevronDown } from 'lucide-react';
 import { cn } from '@/app/lib/utils';
 import { useDebounce } from '@/app/lib/hooks';
-import { searchUsersForFilter, getUserByIdForFilter, UserFilterOption } from '@/app/events/actions';
+import { searchUsersForFilter, getUsersByIdsForFilter, UserFilterOption } from '@/app/events/actions';
 
 interface UserComboboxProps {
-  value: string;
-  onChange: (userId: string) => void;
+  value: string[];
+  onChange: (userIds: string[]) => void;
   placeholder?: string;
   label?: string;
   className?: string;
 }
 
 export function UserCombobox({
-  value,
+  value = [],
   onChange,
   placeholder = 'All Users',
   label,
@@ -26,7 +26,7 @@ export function UserCombobox({
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [options, setOptions] = useState<UserFilterOption[]>([]);
-  const [selectedUser, setSelectedUser] = useState<UserFilterOption | null>(null);
+  const [selectedUsers, setSelectedUsers] = useState<UserFilterOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,25 +64,27 @@ export function UserCombobox({
     }
   }, [isOpen, updatePosition]);
 
-  // Fetch single user details when value changes (e.g. URL load or reset)
+  // Sync selectedUsers array when value prop changes (e.g. from URL load)
   useEffect(() => {
     let isMounted = true;
-    if (value) {
-      if (selectedUser?.id !== value) {
-        getUserByIdForFilter(value).then((res) => {
+    if (value.length > 0) {
+      const missingIds = value.filter((id) => !selectedUsers.some((u) => u.id === id));
+      if (missingIds.length > 0) {
+        getUsersByIdsForFilter(value).then((res) => {
           if (isMounted && res.success && res.data) {
-            setSelectedUser(res.data);
+            setSelectedUsers(res.data);
           }
         });
+      } else {
+        setSelectedUsers((prev) => prev.filter((u) => value.includes(u.id)));
       }
     } else {
-      setSelectedUser(null);
-      setSearchQuery('');
+      setSelectedUsers([]);
     }
     return () => {
       isMounted = false;
     };
-  }, [value, selectedUser?.id]);
+  }, [value]);
 
   // Load users when opened or when debounced search query changes
   const fetchUsers = useCallback(async (query: string) => {
@@ -110,7 +112,6 @@ export function UserCombobox({
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
       if (containerRef.current && !containerRef.current.contains(target)) {
-        // Also check if target is inside the portaled dropdown
         const portalEl = document.getElementById('user-combobox-portal');
         if (portalEl && portalEl.contains(target)) {
           return;
@@ -123,15 +124,25 @@ export function UserCombobox({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSelect = (user: UserFilterOption | null) => {
-    if (user) {
-      setSelectedUser(user);
-      onChange(user.id);
+  const toggleUser = (user: UserFilterOption) => {
+    if (value.includes(user.id)) {
+      onChange(value.filter((id) => id !== user.id));
     } else {
-      setSelectedUser(null);
-      onChange('');
+      onChange([...value, user.id]);
     }
-    setIsOpen(false);
+    setSearchQuery('');
+    updatePosition();
+  };
+
+  const removeUser = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange(value.filter((v) => v !== id));
+  };
+
+  const handleClearAll = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange([]);
+    setSelectedUsers([]);
     setSearchQuery('');
   };
 
@@ -139,14 +150,8 @@ export function UserCombobox({
     if (user.firstName || user.lastName) {
       return `${user.firstName || ''} ${user.lastName || ''}`.trim();
     }
-    return user.authUserId.length > 16 ? `${user.authUserId.slice(0, 16)}...` : user.authUserId;
+    return user.authUserId.length > 14 ? `${user.authUserId.slice(0, 14)}...` : user.authUserId;
   };
-
-  const displayInputValue = isOpen
-    ? searchQuery
-    : selectedUser
-    ? getUserDisplayName(selectedUser)
-    : '';
 
   return (
     <div className={cn('w-full relative', className)} ref={containerRef}>
@@ -155,6 +160,28 @@ export function UserCombobox({
           {label}
         </label>
       )}
+
+      {/* Selected Users Tags */}
+      {selectedUsers.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {selectedUsers.map((user) => (
+            <span
+              key={user.id}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-medium bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+            >
+              <span>{getUserDisplayName(user)}</span>
+              <button
+                type="button"
+                onClick={(e) => removeUser(user.id, e)}
+                className="hover:text-indigo-900 dark:hover:text-indigo-100 rounded"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="relative">
         <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
           {loading ? (
@@ -167,14 +194,15 @@ export function UserCombobox({
         <input
           ref={inputRef}
           type="text"
-          value={displayInputValue}
-          placeholder={selectedUser ? getUserDisplayName(selectedUser) : placeholder}
+          value={searchQuery}
+          placeholder={
+            value.length > 0
+              ? `${value.length} user${value.length > 1 ? 's' : ''} selected`
+              : placeholder
+          }
           onFocus={() => {
             updatePosition();
             setIsOpen(true);
-            if (selectedUser) {
-              setSearchQuery('');
-            }
           }}
           onChange={(e) => {
             setSearchQuery(e.target.value);
@@ -196,15 +224,12 @@ export function UserCombobox({
         />
 
         <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-          {(value || searchQuery) && (
+          {(value.length > 0 || searchQuery) && (
             <button
               type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSelect(null);
-              }}
+              onClick={handleClearAll}
               className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-md transition-colors"
-              title="Clear selection"
+              title="Clear all"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -234,30 +259,15 @@ export function UserCombobox({
           }}
           className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 max-h-60 overflow-y-auto py-1.5 animate-in fade-in-50 zoom-in-95"
         >
-          {/* Default clear / All users option */}
-          <button
-            type="button"
-            onClick={() => handleSelect(null)}
-            className={cn(
-              'w-full px-4 py-2 text-left text-sm flex items-center justify-between transition-colors',
-              !value
-                ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium'
-                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60'
-            )}
-          >
-            <span>All Users</span>
-            {!value && <Check className="w-4 h-4 text-indigo-500" />}
-          </button>
-
           {options.length > 0 ? (
             options.map((user) => {
-              const isSelected = value === user.id;
+              const isSelected = value.includes(user.id);
               const name = getUserDisplayName(user);
               return (
                 <button
                   key={user.id}
                   type="button"
-                  onClick={() => handleSelect(user)}
+                  onClick={() => toggleUser(user)}
                   className={cn(
                     'w-full px-4 py-2.5 text-left text-sm flex items-center justify-between transition-colors',
                     isSelected
@@ -271,7 +281,16 @@ export function UserCombobox({
                       {user.authUserId}
                     </span>
                   </div>
-                  {isSelected && <Check className="w-4 h-4 text-indigo-500 shrink-0" />}
+                  <div
+                    className={cn(
+                      'w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors',
+                      isSelected
+                        ? 'bg-indigo-500 border-indigo-500 text-white'
+                        : 'border-gray-300 dark:border-gray-600'
+                    )}
+                  >
+                    {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                  </div>
                 </button>
               );
             })

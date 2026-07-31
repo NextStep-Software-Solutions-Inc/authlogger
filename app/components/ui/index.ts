@@ -10,4 +10,6 @@ export { Modal, ConfirmModal } from './Modal';
 export { StatCard } from './StatCard';
 export { EmptyState, LoadingSpinner, PageLoader, AnimatedList, ProgressBar } from './Feedback';
 export { UserCombobox } from './UserCombobox';
+export { MultiSelect } from './MultiSelect';
+
 
