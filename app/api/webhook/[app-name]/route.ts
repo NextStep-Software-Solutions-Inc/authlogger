@@ -42,13 +42,14 @@ export async function POST(req: Request, { params }: { params: Params }) {
 
     const eventType = evt.type;
 
-    // Extract exact event occurrence timestamp from Clerk payload (or fallback to Date.now())
-    const rawEvt = evt as unknown as { timestamp?: number; data?: { created_at?: number; last_active_at?: number } };
-    const clerkTimeRaw = rawEvt.timestamp || rawEvt.data?.created_at || rawEvt.data?.last_active_at;
+    // Strictly use Clerk's top-level event occurrence timestamp (`payload.timestamp`).
+    // This represents the exact datetime when the event occurred in Clerk, regardless of delivery retries or replays.
+    const rawEvt = evt as unknown as { timestamp?: number; data?: { created_at?: number; updated_at?: number } };
+    const clerkEventTimestamp = rawEvt.timestamp ?? rawEvt.data?.created_at;
     
     let eventMs = Date.now();
-    if (clerkTimeRaw && typeof clerkTimeRaw === 'number') {
-        eventMs = clerkTimeRaw < 1e11 ? clerkTimeRaw * 1000 : clerkTimeRaw;
+    if (clerkEventTimestamp && typeof clerkEventTimestamp === 'number') {
+        eventMs = clerkEventTimestamp < 1e11 ? clerkEventTimestamp * 1000 : clerkEventTimestamp;
     }
     const eventDate = new Date(eventMs);
 
