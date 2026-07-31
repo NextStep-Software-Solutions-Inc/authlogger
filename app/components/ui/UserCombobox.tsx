@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { User as UserIcon, X, Check, Loader2, ChevronDown } from 'lucide-react';
 import { cn } from '@/app/lib/utils';
 import { useDebounce } from '@/app/lib/hooks';
@@ -21,14 +22,47 @@ export function UserCombobox({
   label,
   className,
 }: UserComboboxProps) {
+  const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [options, setOptions] = useState<UserFilterOption[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserFilterOption | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const debouncedSearch = useDebounce(searchQuery, 300);
+
+  // SSR hydration safety
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Compute fixed position for portal dropdown
+  const updatePosition = useCallback(() => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setDropdownPos({
+        top: rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+  }, []);
+
+  // Update position on scroll/resize when open
+  useEffect(() => {
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener('resize', updatePosition);
+      window.addEventListener('scroll', updatePosition, true);
+      return () => {
+        window.removeEventListener('resize', updatePosition);
+        window.removeEventListener('scroll', updatePosition, true);
+      };
+    }
+  }, [isOpen, updatePosition]);
 
   // Fetch single user details when value changes (e.g. URL load or reset)
   useEffect(() => {
@@ -74,7 +108,13 @@ export function UserCombobox({
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (containerRef.current && !containerRef.current.contains(target)) {
+        // Also check if target is inside the portaled dropdown
+        const portalEl = document.getElementById('user-combobox-portal');
+        if (portalEl && portalEl.contains(target)) {
+          return;
+        }
         setIsOpen(false);
         setSearchQuery('');
       }
@@ -125,10 +165,12 @@ export function UserCombobox({
         </div>
 
         <input
+          ref={inputRef}
           type="text"
           value={displayInputValue}
           placeholder={selectedUser ? getUserDisplayName(selectedUser) : placeholder}
           onFocus={() => {
+            updatePosition();
             setIsOpen(true);
             if (selectedUser) {
               setSearchQuery('');
@@ -136,7 +178,10 @@ export function UserCombobox({
           }}
           onChange={(e) => {
             setSearchQuery(e.target.value);
-            if (!isOpen) setIsOpen(true);
+            if (!isOpen) {
+              updatePosition();
+              setIsOpen(true);
+            }
           }}
           className={cn(
             'w-full pl-9 pr-16 py-2.5 rounded-xl text-sm',
@@ -166,7 +211,10 @@ export function UserCombobox({
           )}
           <button
             type="button"
-            onClick={() => setIsOpen(!isOpen)}
+            onClick={() => {
+              if (!isOpen) updatePosition();
+              setIsOpen(!isOpen);
+            }}
             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
           >
             <ChevronDown className={cn('w-4 h-4 transition-transform duration-200', isOpen && 'rotate-180')} />
@@ -174,8 +222,18 @@ export function UserCombobox({
         </div>
       </div>
 
-      {isOpen && (
-        <div className="absolute z-50 mt-1.5 w-full bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 max-h-60 overflow-y-auto py-1.5 animate-in fade-in-50 zoom-in-95">
+      {mounted && isOpen && createPortal(
+        <div
+          id="user-combobox-portal"
+          style={{
+            position: 'fixed',
+            top: `${dropdownPos.top}px`,
+            left: `${dropdownPos.left}px`,
+            width: `${dropdownPos.width}px`,
+            zIndex: 9999,
+          }}
+          className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 max-h-60 overflow-y-auto py-1.5 animate-in fade-in-50 zoom-in-95"
+        >
           {/* Default clear / All users option */}
           <button
             type="button"
@@ -222,7 +280,8 @@ export function UserCombobox({
               No users found
             </div>
           ) : null}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
