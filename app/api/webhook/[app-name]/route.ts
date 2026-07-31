@@ -42,6 +42,28 @@ export async function POST(req: Request, { params }: { params: Params }) {
 
     const eventType = evt.type;
 
+    // Extract exact event timestamp using sample payload structure reference:
+    // Priority 1: Top-level payload.timestamp (e.g. 1785473923937 in sample) - Event occurrence time
+    // Priority 2: Inner payload.data.created_at or payload.data.updated_at (e.g. 1785473923864 in sample)
+    const payloadRef = evt as unknown as { 
+        timestamp?: number; 
+        data?: { 
+            created_at?: number; 
+            updated_at?: number;
+            last_active_at?: number;
+        } 
+    };
+
+    const clerkEventTimestamp = payloadRef.timestamp ?? payloadRef.data?.created_at ?? payloadRef.data?.updated_at ?? payloadRef.data?.last_active_at;
+    
+    let eventMs = Date.now();
+    if (clerkEventTimestamp && typeof clerkEventTimestamp === 'number') {
+        eventMs = clerkEventTimestamp < 1e11 ? clerkEventTimestamp * 1000 : clerkEventTimestamp;
+    }
+    // timeStamp (BigInt ms) = When the event REALLY occurred in Clerk (payload.timestamp)
+    // createdAt (DateTime) = When the event REACHED OUR SERVER (Server Delivery Receipt time)
+    const serverReceiptDate = new Date();
+
     try {
         // Handle the event
         switch (eventType) {
@@ -49,6 +71,8 @@ export async function POST(req: Request, { params }: { params: Params }) {
                 await prisma.authEvent.create({
                     data: {
                         eventType,
+                        timeStamp: BigInt(eventMs),
+                        createdAt: serverReceiptDate,
                         application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
@@ -65,20 +89,26 @@ export async function POST(req: Request, { params }: { params: Params }) {
             case 'session.ended':
                 await prisma.authEvent.create({
                     data: {
+                        eventType,
+                        timeStamp: BigInt(eventMs),
+                        createdAt: serverReceiptDate,
+                        application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
                                 where: { authUserId: evt.data.user_id },
                                 create: { authUserId: evt.data.user_id }
                             }
                         },
-                        eventType,
-                        application: { connect: { name: appName } }
                     },
                 });
                 break;
+
             case 'user.created':
                 await prisma.authEvent.create({
                     data: {
+                        eventType,
+                        timeStamp: BigInt(eventMs),
+                        createdAt: serverReceiptDate,
                         application: { connect: { name: appName } },
                         user: {
                             connectOrCreate: {
@@ -91,15 +121,17 @@ export async function POST(req: Request, { params }: { params: Params }) {
                                 }
                             }
                         },
-                        eventType,
                     },
                 });
                 break;
+
             case 'user.updated':
                 await prisma.$transaction(async (tx) => {
                     await tx.authEvent.create({
                         data: {
                             eventType,
+                            timeStamp: BigInt(eventMs),
+                            createdAt: serverReceiptDate,
                             application: { connect: { name: appName } },
                             user: { connect: { authUserId: evt.data.id } },
                         }

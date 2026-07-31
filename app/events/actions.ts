@@ -27,6 +27,7 @@ export interface AuthEvent {
     userId: string;
     applicationId: string;
     createdAt: Date;
+    timeStamp: bigint | number;
     application: {
         id: string;
         name: string;
@@ -179,6 +180,28 @@ export const getApplicationsForFilterCached = unstable_cache(
     { revalidate: 60, tags: ['applications'] }
 );
 
+// Cached page 1 events helper
+const fetchEventsPage1Cached = unstable_cache(
+    async (limit: number) => {
+        const [events, total] = await Promise.all([
+            prisma.authEvent.findMany({
+                include: eventInclude,
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
+                take: limit,
+                skip: 0,
+            }),
+            prisma.authEvent.count()
+        ]);
+        return { events: events as AuthEvent[], total, hasMore: limit < total };
+    },
+    ['events-page-1'],
+    { revalidate: 15, tags: ['events'] }
+);
+
 // Main event queries
 export async function getEvents(
     filters: EventFilters = {},
@@ -187,12 +210,22 @@ export async function getEvents(
     try {
         const where = buildWhereClause(filters);
         const { limit, offset } = validatePagination(pagination);
+        const hasFilters = Object.keys(where).length > 0;
+
+        if (!hasFilters && offset === 0) {
+            const data = await fetchEventsPage1Cached(limit);
+            return { success: true, data };
+        }
 
         const [events, total] = await Promise.all([
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { timeStamp: 'desc' },
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
                 take: limit,
                 skip: offset,
             }),
@@ -212,16 +245,78 @@ export async function getEvents(
     }
 }
 
+// Cached overview stats helper
+const fetchOverviewStatsCached = unstable_cache(
+    async () => {
+        const now = new Date();
+        const manilaDateStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
+        const todayStartMs = new Date(`${manilaDateStr}T00:00:00.000+08:00`).getTime();
+        const weekStartMs = todayStartMs - 7 * 24 * 60 * 60 * 1000;
+
+        const [
+            totalEvents,
+            eventsByType,
+            recentActivity,
+            todayCount,
+            weekCount,
+            uniqueUsersRes
+        ] = await Promise.all([
+            prisma.authEvent.count(),
+            prisma.authEvent.groupBy({
+                by: ['eventType'],
+                _count: { eventType: true },
+                orderBy: { _count: { eventType: 'desc' } }
+            }),
+            prisma.authEvent.findMany({
+                include: eventInclude,
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
+                take: 10
+            }),
+            prisma.authEvent.count({
+                where: { timeStamp: { gte: BigInt(todayStartMs) } }
+            }),
+            prisma.authEvent.count({
+                where: { timeStamp: { gte: BigInt(weekStartMs) } }
+            }),
+            prisma.$queryRaw<{ count: number }[]>`SELECT COUNT(DISTINCT "userId")::int as count FROM "AuthEvent"`
+        ]);
+
+        return {
+            totalEvents,
+            eventsByType: eventsByType.map(item => ({
+                type: item.eventType,
+                count: item._count.eventType
+            })),
+            recentActivity: recentActivity as AuthEvent[],
+            todayCount,
+            weekCount,
+            uniqueUsers: Number(uniqueUsersRes[0]?.count || 0)
+        };
+    },
+    ['overview-event-stats'],
+    { revalidate: 30, tags: ['events'] }
+);
+
 // Get event statistics with caching
 export async function getEventStats(
     filters: EventFilters = {}
 ): Promise<ActionResult<EventStats>> {
     try {
         const where = buildWhereClause(filters);
+        const hasFilters = Object.keys(where).length > 0;
+
+        if (!hasFilters) {
+            const data = await fetchOverviewStatsCached();
+            return { success: true, data };
+        }
 
         // Compute today/week start timestamps in Asia/Manila (+08:00)
         const now = new Date();
-        const manilaDateStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' }); // YYYY-MM-DD
+        const manilaDateStr = now.toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
         const todayStartMs = new Date(`${manilaDateStr}T00:00:00.000+08:00`).getTime();
         const weekStartMs = todayStartMs - 7 * 24 * 60 * 60 * 1000;
 
@@ -233,10 +328,8 @@ export async function getEventStats(
             weekCount,
             uniqueUsers
         ] = await Promise.all([
-            // Total events count
             prisma.authEvent.count({ where }),
 
-            // Events grouped by type
             prisma.authEvent.groupBy({
                 by: ['eventType'],
                 where,
@@ -244,15 +337,17 @@ export async function getEventStats(
                 orderBy: { _count: { eventType: 'desc' } }
             }),
 
-            // Recent activity (last 10 events)
             prisma.authEvent.findMany({
                 where,
                 include: eventInclude,
-                orderBy: { timeStamp: 'desc' },
+                orderBy: [
+                    { timeStamp: 'desc' },
+                    { createdAt: 'desc' },
+                    { id: 'desc' }
+                ],
                 take: 10
             }),
 
-            // Today's events (using timeStamp index)
             prisma.authEvent.count({
                 where: {
                     ...where,
@@ -260,7 +355,6 @@ export async function getEventStats(
                 }
             }),
 
-            // This week's events (using timeStamp index)
             prisma.authEvent.count({
                 where: {
                     ...where,
@@ -268,7 +362,6 @@ export async function getEventStats(
                 }
             }),
 
-            // Unique users via DB aggregation
             prisma.authEvent.groupBy({
                 by: ['userId'],
                 where

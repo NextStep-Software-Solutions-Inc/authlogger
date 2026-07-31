@@ -54,6 +54,7 @@ interface AuthEvent {
   userId: string;
   applicationId: string;
   createdAt: Date;
+  timeStamp?: bigint | number;
   application: { id: string; name: string };
   user: { id: string; authUserId: string; firstName: string | null; lastName: string | null } | null;
 }
@@ -221,10 +222,12 @@ function EventsPage() {
     }
   }, [selectedApplications, selectedEventTypes, selectedUsers, startDate, endDate, currentPage]);
 
+  // Load initial apps & stats once on mount
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
 
+  // Load events when initialized or filters/page change
   useEffect(() => {
     if (isInitialized) {
       loadEvents();
@@ -649,7 +652,7 @@ function EventsPage() {
                         Time
                       </th>
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Time Ago
+                        Delivered At
                       </th>
                     </tr>
                   </thead>
@@ -658,6 +661,11 @@ function EventsPage() {
                       {events.map((event, index) => {
                         const colors = getEventTypeColor(event.eventType);
                         const Icon = getEventIcon(event.eventType);
+                        const occurredDate = new Date(Number(event.timeStamp || event.createdAt));
+                        const deliveredDate = new Date(event.createdAt);
+                        const diffMinutes = Math.abs(deliveredDate.getTime() - occurredDate.getTime()) / (1000 * 60);
+                        const isReplayed = diffMinutes > 5;
+
                         return (
                           <motion.tr
                             key={event.id}
@@ -672,16 +680,18 @@ function EventsPage() {
                                 <div className={cn('p-2 rounded-lg', colors.bg)}>
                                   <Icon className={cn('w-4 h-4', colors.text)} />
                                 </div>
-                                <Badge
-                                  variant={
-                                    event.eventType.includes('created') ? 'success' :
-                                      event.eventType.includes('ended') || event.eventType.includes('revoked') ? 'danger' :
-                                        'default'
-                                  }
-                                  size="sm"
-                                >
-                                  {event.eventType}
-                                </Badge>
+                                <div className="flex flex-col gap-1">
+                                  <Badge
+                                    variant={
+                                      event.eventType.includes('created') ? 'success' :
+                                        event.eventType.includes('ended') || event.eventType.includes('revoked') ? 'danger' :
+                                          'default'
+                                    }
+                                    size="sm"
+                                  >
+                                    {event.eventType}
+                                  </Badge>
+                                </div>
                               </div>
                             </td>
                             <td className="px-6 py-4">
@@ -703,7 +713,7 @@ function EventsPage() {
                             </td>
                             <td className="px-6 py-4">
                               <span className="text-sm text-gray-700 dark:text-gray-300">
-                                {event.createdAt.toLocaleDateString('en-US', {
+                                {occurredDate.toLocaleDateString('en-US', {
                                   timeZone: 'Asia/Manila',
                                   month: 'short',
                                   day: 'numeric',
@@ -713,7 +723,7 @@ function EventsPage() {
                             </td>
                             <td className="px-6 py-4">
                               <span className="text-sm text-gray-700 dark:text-gray-300">
-                                {event.createdAt.toLocaleTimeString('en-US', {
+                                {occurredDate.toLocaleTimeString('en-US', {
                                   timeZone: 'Asia/Manila',
                                   hour: 'numeric',
                                   minute: '2-digit',
@@ -722,11 +732,28 @@ function EventsPage() {
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-300">
-                                <Clock className="w-4 h-4" />
-                                <span title={formatDateTime(event.createdAt)}>
-                                  {getRelativeTime(event.createdAt)}
+                              <div className="flex flex-col">
+                                <span className="text-sm text-gray-900 dark:text-white font-medium">
+                                  {deliveredDate.toLocaleDateString('en-US', {
+                                    timeZone: 'Asia/Manila',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric'
+                                  })}, {deliveredDate.toLocaleTimeString('en-US', {
+                                    timeZone: 'Asia/Manila',
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                    hour12: true
+                                  })}
                                 </span>
+                                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                  <span>({getRelativeTime(deliveredDate)})</span>
+                                  {isReplayed && (
+                                    <span className="font-semibold text-amber-600 dark:text-amber-400">
+                                      • 🔄 Replayed
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </td>
                           </motion.tr>

@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "listener": "node webhook-listener/server.js",
+    "simulate": "node webhook-listener/simulate.js"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.39.6",
