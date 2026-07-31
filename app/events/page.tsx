@@ -654,9 +654,6 @@ function EventsPage() {
                       <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Delivered At
                       </th>
-                      <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Time Ago
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -735,12 +732,13 @@ function EventsPage() {
                               </span>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex flex-col gap-0.5">
-                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                              <div className="flex flex-col">
+                                <span className="text-sm text-gray-900 dark:text-white font-medium">
                                   {deliveredDate.toLocaleDateString('en-US', {
                                     timeZone: 'Asia/Manila',
                                     month: 'short',
-                                    day: 'numeric'
+                                    day: 'numeric',
+                                    year: 'numeric'
                                   })}, {deliveredDate.toLocaleTimeString('en-US', {
                                     timeZone: 'Asia/Manila',
                                     hour: 'numeric',
@@ -748,19 +746,14 @@ function EventsPage() {
                                     hour12: true
                                   })}
                                 </span>
-                                {isReplayed && (
-                                  <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                                    🔄 Replayed
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-300">
-                                <Clock className="w-4 h-4" />
-                                <span title={formatDateTime(occurredDate)}>
-                                  {getRelativeTime(occurredDate)}
-                                </span>
+                                <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                  <span>({getRelativeTime(deliveredDate)})</span>
+                                  {isReplayed && (
+                                    <span className="font-semibold text-amber-600 dark:text-amber-400">
+                                      • 🔄 Replayed
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </td>
                           </motion.tr>
