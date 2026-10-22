@@ -2,6 +2,9 @@
   "name": "auth-logs",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.23.4 <23.0.0 || >=24.22.1 <25.0.0 || >=26.12.1"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
@@ -17,31 +20,25 @@
     "date-fns": "^4.4.0",
     "framer-motion": "^12.43.0",
     "lucide-react": "^0.555.0",
-    "next": "^16.2.12",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "recharts": "^3.5.1",
+    "next": "^16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "^3.10.1",
     "svix": "^1.99.1",
-    "tailwind-merge": "^3.6.0",
-    "xlsx": "^0.18.5",
-    "zustand": "^5.0.14"
+    "tailwind-merge": "^3.7.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.6",
+    "@eslint/eslintrc": "^3.3.7",
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/node": "^20.19.25",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.1",
-    "eslint-config-next": "^16.2.12",
+    "eslint-config-next": "^16.4.2",
     "prisma": "^6.19.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "@types/react": "^19.2.18",
-      "@types/react-dom": "^19.2.4"
-    }
   }
 }

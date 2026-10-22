@@ -15,7 +15,7 @@ A comprehensive authentication event monitoring and analytics platform built wit
 
 ## Tech Stack
 
-- **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS
+- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS
 - **Backend**: Next.js API Routes, Server Actions
 - **Database**: PostgreSQL with Prisma ORM
 - **Authentication**: Clerk Authentication
@@ -24,7 +24,7 @@ A comprehensive authentication event monitoring and analytics platform built wit
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js >=22.23.4, >=24.22.1, or >=26.12.1 (patched against Oct 21, 2026 security advisory)
 - PostgreSQL database
 - Clerk account for authentication
 - Vercel account for deployment (optional)
